@@ -1,0 +1,132 @@
+[
+  {
+    "id": "kb-1",
+    "type": "knowledge",
+    "question": "RAG 相比传统大语言模型有什么优势?",
+    "expected_keywords": ["幻觉", "溯源", "知识可更新", "成本"]
+  },
+  {
+    "id": "kb-2",
+    "type": "knowledge",
+    "question": "一个完整的 RAG 系统包含哪些阶段?",
+    "expected_keywords": ["Loader", "Embedding", "Retriever", "Reranker", "LLM"]
+  },
+  {
+    "id": "kb-3",
+    "type": "knowledge",
+    "question": "LangGraph 的四个核心概念是什么?",
+    "expected_keywords": ["State", "Node", "Edge", "Conditional"]
+  },
+  {
+    "id": "kb-4",
+    "type": "knowledge",
+    "question": "Rerank 重排序在 RAG 中起什么作用?",
+    "expected_keywords": ["Cross-Encoder", "Top 5", "候选", "相关"]
+  },
+  {
+    "id": "kb-5",
+    "type": "knowledge",
+    "question": "什么是 RAG?",
+    "expected_keywords": ["检索", "生成", "知识库", "上下文"]
+  },
+  {
+    "id": "multi-1",
+    "type": "multi_hop",
+    "question": "本平台如何结合 RAG 与 LangGraph 的自我校验来减少幻觉?",
+    "expected_keywords": ["检索", "Self Critique", "幻觉", "重新生成"]
+  },
+  {
+    "id": "multi-2",
+    "type": "multi_hop",
+    "question": "为什么 LangGraph 的条件路由适合编排 RAG 与工具两种工作流?",
+    "expected_keywords": ["Conditional", "工具", "RAG", "分支"]
+  },
+  {
+    "id": "multi-3",
+    "type": "multi_hop",
+    "question": "从文档上传到生成带来源的答案,经过了哪些模块与节点?",
+    "expected_keywords": ["Loader", "Reranker", "生成", "来源"]
+  },
+  {
+    "id": "multi-4",
+    "type": "multi_hop",
+    "question": "Rerank 与上下文压缩如何共同提升最终回答的质量?",
+    "expected_keywords": ["Rerank", "上下文", "压缩", "质量"]
+  },
+  {
+    "id": "multi-5",
+    "type": "multi_hop",
+    "question": "Agent 的意图路由与 RAG 检索是如何协作完成问答的?",
+    "expected_keywords": ["意图", "检索", "路由", "知识库"]
+  },
+  {
+    "id": "noans-1",
+    "type": "no_answer",
+    "question": "公司 2027 年第三季度的净利润是多少?",
+    "expected_keywords": [],
+    "expected_behavior": "reject"
+  },
+  {
+    "id": "noans-2",
+    "type": "no_answer",
+    "question": "请介绍一下量子引力的最新统一理论细节。",
+    "expected_keywords": [],
+    "expected_behavior": "reject"
+  },
+  {
+    "id": "noans-3",
+    "type": "no_answer",
+    "question": "张三的家庭住址和电话号码是什么?",
+    "expected_keywords": [],
+    "expected_behavior": "reject"
+  },
+  {
+    "id": "noans-4",
+    "type": "no_answer",
+    "question": "这个知识库里关于烹饪红烧肉的秘方写了什么?",
+    "expected_keywords": [],
+    "expected_behavior": "reject"
+  },
+  {
+    "id": "noans-5",
+    "type": "no_answer",
+    "question": "请给出本产品在火星基地的部署步骤。",
+    "expected_keywords": [],
+    "expected_behavior": "reject"
+  },
+  {
+    "id": "tool-1",
+    "type": "tool",
+    "question": "12345*678",
+    "expected_keywords": [],
+    "expected_behavior": "calculator"
+  },
+  {
+    "id": "tool-2",
+    "type": "tool",
+    "question": "帮我计算 (3+4)*25 等于多少?",
+    "expected_keywords": [],
+    "expected_behavior": "calculator"
+  },
+  {
+    "id": "tool-3",
+    "type": "tool",
+    "question": "最新的 AI 新闻有哪些?",
+    "expected_keywords": [],
+    "expected_behavior": "web_search"
+  },
+  {
+    "id": "tool-4",
+    "type": "tool",
+    "question": "现在几点了?今天是星期几?",
+    "expected_keywords": [],
+    "expected_behavior": "datetime"
+  },
+  {
+    "id": "tool-5",
+    "type": "tool",
+    "question": "实时查询一下今天的科技热点新闻。",
+    "expected_keywords": [],
+    "expected_behavior": "web_search"
+  }
+]

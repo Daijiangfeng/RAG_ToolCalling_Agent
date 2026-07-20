@@ -1,0 +1,43 @@
+# One-command deployment: `docker compose up --build`
+# - backend : FastAPI + LangGraph agent (embedded Chroma persistent store)
+# - frontend: React SPA served by nginx, proxies /api -> backend
+#
+# The backend runs fully offline by default (mock LLM + hash embedding +
+# lexical reranker). Provide OPENAI_API_KEY (and optionally switch
+# EMBEDDING_BACKEND=openai / RERANKER_BACKEND=cross-encoder) to use real models.
+services:
+  backend:
+    build: ./backend
+    container_name: kap-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # --- LLM (智谱 GLM, OpenAI 兼容; 留空 OPENAI_API_KEY 则离线 mock) ---
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
+      MODEL_NAME: "${MODEL_NAME:-glm-4.5-air}"
+      # --- RAG backends ---
+      EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-hash}"
+      OPENAI_EMBEDDING_MODEL: "${OPENAI_EMBEDDING_MODEL:-embedding-3}"
+      EMBEDDING_DIM: "${EMBEDDING_DIM:-2048}"
+      RERANKER_BACKEND: "${RERANKER_BACKEND:-lexical}"
+      VECTOR_BACKEND: "chroma"
+      CHROMA_DIR: "/app/data/chroma"
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    container_name: kap-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:

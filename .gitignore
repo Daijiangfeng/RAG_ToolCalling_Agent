@@ -1,0 +1,23 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.env
+
+# --- Backend runtime data ---
+backend/data/chroma/
+backend/data/uploads/
+backend/data/app.db
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.vite/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
