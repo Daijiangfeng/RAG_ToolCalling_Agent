@@ -31,14 +31,23 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- LLM (OpenAI compatible) -----------------------------------------
-    # 智谱 GLM 使用 AUTH_TOKEN 作为 Bearer 令牌（Authorization: Bearer <token>）。
-    # 兼容旧的 OPENAI_API_KEY 变量名，便于平滑迁移。
+    # --- LLM (智谱 GLM，Anthropic 兼容端点) --------------------------------
+    # 智谱 GLM 通过 Anthropic 兼容端点调用：使用 ANTHROPIC_AUTH_TOKEN 作为
+    # Bearer 令牌，Anthropic SDK 会以 ``Authorization: Bearer <token>`` 发送
+    # （而非默认的 x-api-key 头）。同一个令牌也用于 OpenAI 兼容的向量端点。
+    # 兼容旧的 AUTH_TOKEN / OPENAI_API_KEY 变量名，便于平滑迁移。
     model_name: str = "glm-4.5-air"
     auth_token: str = Field(
         default="",
-        validation_alias=AliasChoices("AUTH_TOKEN", "OPENAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "ANTHROPIC_AUTH_TOKEN", "AUTH_TOKEN", "OPENAI_API_KEY"
+        ),
     )
+    # Anthropic 兼容端点（对话/生成）。
+    anthropic_base_url: str = "https://open.bigmodel.cn/api/anthropic"
+    # Anthropic messages API 要求显式的 max_tokens。
+    max_tokens: int = 1024
+    # OpenAI 兼容端点（仅用于向量 embedding）。
     openai_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
 
     # --- Embedding --------------------------------------------------------

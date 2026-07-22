@@ -1,8 +1,8 @@
-"""LLM client wrapper around any OpenAI-compatible API.
+"""LLM client wrapper around the Anthropic Messages API.
 
-When no ``AUTH_TOKEN`` is configured (or the SDK/network is unavailable) the
-client transparently falls back to a deterministic *mock* implementation so that
-the whole platform, its demos and its test-suite remain fully runnable offline.
+智谱 GLM 提供 Anthropic 兼容端点，因此本客户端直接用官方 ``anthropic`` SDK
+调用。当未配置 ``ANTHROPIC_AUTH_TOKEN``（或 SDK/网络不可用）时，客户端透明地
+回退到确定性的 *mock* 实现，以保证整个平台、演示与测试套件完全可离线运行。
 """
 
 from __future__ import annotations
@@ -19,28 +19,47 @@ logger = get_logger(__name__)
 Message = dict[str, str]
 
 
+def _split_system(messages: list[Message]) -> tuple[str, list[Message]]:
+    """Convert OpenAI-style messages to the Anthropic layout.
+
+    Anthropic 将 system 提示作为顶层参数（而非 messages 中的一条角色），
+    因此这里把所有 ``system`` 消息合并为一段，其余消息原样保留。
+    """
+    system_parts = [m.get("content", "") for m in messages if m.get("role") == "system"]
+    convo = [
+        {"role": m.get("role", "user"), "content": m.get("content", "")}
+        for m in messages
+        if m.get("role") != "system"
+    ]
+    system = "\n".join(p for p in system_parts if p)
+    if not convo:
+        # Anthropic 要求至少一条消息；仅有 system 时降级为 user。
+        convo = [{"role": "user", "content": system or ""}]
+    return system, convo
+
+
 class LLMClient:
     def __init__(self) -> None:
         self._client = None
         self._mode = "mock"
         if settings.has_llm:
             try:  # pragma: no cover - depends on optional network/SDK
-                from openai import OpenAI
+                import anthropic
 
-                # 智谱 GLM 兼容 OpenAI 协议：auth_token 作为 Bearer 令牌，SDK 会
-                # 自动以 ``Authorization: Bearer <token>`` 发送。
-                self._client = OpenAI(
-                    api_key=settings.auth_token,
-                    base_url=settings.openai_base_url,
+                # 智谱 GLM Anthropic 兼容端点：使用 auth_token 令牌，SDK 会以
+                # ``Authorization: Bearer <token>`` 发送（而非默认的 x-api-key）。
+                self._client = anthropic.Anthropic(
+                    auth_token=settings.auth_token,
+                    base_url=settings.anthropic_base_url,
                 )
-                self._mode = "openai"
-                logger.info("LLMClient initialised in OpenAI mode (%s)", settings.model_name)
+                self._mode = "anthropic"
+                logger.info("LLMClient initialised in Anthropic mode (%s)", settings.model_name)
             except Exception as exc:  # pragma: no cover
                 logger.warning("Falling back to mock LLM: %s", exc)
                 self._client = None
                 self._mode = "mock"
         else:
-            logger.info("No AUTH_TOKEN set -> LLMClient running in offline mock mode")
+            logger.info("No ANTHROPIC_AUTH_TOKEN set -> LLMClient running in offline mock mode")
 
     @property
     def mode(self) -> str:
@@ -55,12 +74,12 @@ class LLMClient:
         runtime failure into an explicit, actionable startup log.
         """
         if self._client is None:
-            return True, "离线 mock 模式（未配置 AUTH_TOKEN）"
+            return True, "离线 mock 模式（未配置 ANTHROPIC_AUTH_TOKEN）"
         try:  # pragma: no cover - network
-            self._client.chat.completions.create(
+            self._client.messages.create(
                 model=settings.model_name,
-                messages=[{"role": "user", "content": "ping"}],
                 max_tokens=1,
+                messages=[{"role": "user", "content": "ping"}],
                 temperature=0.0,
             )
             return True, f"智谱处理器可用（model={settings.model_name}）"
@@ -73,12 +92,19 @@ class LLMClient:
     def complete(self, messages: list[Message], temperature: float = 0.2) -> str:
         if self._client is not None:
             try:  # pragma: no cover - network
-                resp = self._client.chat.completions.create(
+                system, convo = _split_system(messages)
+                kwargs: dict = dict(
                     model=settings.model_name,
-                    messages=messages,
+                    max_tokens=settings.max_tokens,
+                    messages=convo,
                     temperature=temperature,
                 )
-                return resp.choices[0].message.content or ""
+                if system:
+                    kwargs["system"] = system
+                resp = self._client.messages.create(**kwargs)
+                return "".join(
+                    block.text for block in resp.content if getattr(block, "type", None) == "text"
+                )
             except Exception as exc:  # pragma: no cover
                 # A configured provider that fails (auth/quota/model/network) is a
                 # real misconfiguration -- surface it clearly instead of silently
@@ -90,16 +116,19 @@ class LLMClient:
     def stream(self, messages: list[Message], temperature: float = 0.2) -> Iterator[str]:
         if self._client is not None:
             try:  # pragma: no cover - network
-                stream = self._client.chat.completions.create(
+                system, convo = _split_system(messages)
+                kwargs: dict = dict(
                     model=settings.model_name,
-                    messages=messages,
+                    max_tokens=settings.max_tokens,
+                    messages=convo,
                     temperature=temperature,
-                    stream=True,
                 )
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content
-                    if delta:
-                        yield delta
+                if system:
+                    kwargs["system"] = system
+                with self._client.messages.stream(**kwargs) as stream:
+                    for text in stream.text_stream:
+                        if text:
+                            yield text
                 return
             except Exception as exc:  # pragma: no cover
                 logger.error("LLM stream failed: %s", exc)

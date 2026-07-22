@@ -32,7 +32,7 @@ def describe_provider_error(scope: str, exc: Exception) -> str:
     if any(m in low for m in auth_markers):
         return (
             f"{scope}鉴权失败：请求未通过智谱身份验证（如 code 1001/1000、HTTP 401）。"
-            "请检查 backend/.env 中的 AUTH_TOKEN（智谱 Bearer 令牌）是否正确、未过期，并重启服务。"
+            "请检查 backend/.env 中的 ANTHROPIC_AUTH_TOKEN（智谱 Bearer 令牌）是否正确、未过期，并重启服务。"
         )
     if "quota" in low or "1002" in raw or "1113" in raw or "额度" in raw:
         return f"{scope}调用受限：账户额度或权限不足，请检查智谱账户后重试。"
