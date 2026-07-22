@@ -11,6 +11,7 @@ import re
 from collections.abc import Iterator
 
 from app.config import settings
+from app.errors import ProviderError, describe_provider_error
 from app.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,27 @@ class LLMClient:
     def mode(self) -> str:
         return self._mode
 
+    def verify(self) -> tuple[bool, str]:
+        """Best-effort credential/model check used at startup.
+
+        Returns ``(ok, message)``.  In offline mock mode this is always OK.
+        When a provider is configured, a minimal 1-token completion validates
+        that the API key and model name are actually accepted, turning a silent
+        runtime failure into an explicit, actionable startup log.
+        """
+        if self._client is None:
+            return True, "离线 mock 模式（未配置 OPENAI_API_KEY）"
+        try:  # pragma: no cover - network
+            self._client.chat.completions.create(
+                model=settings.model_name,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                temperature=0.0,
+            )
+            return True, f"智谱处理器可用（model={settings.model_name}）"
+        except Exception as exc:  # pragma: no cover - network
+            return False, describe_provider_error("LLM", exc)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -56,7 +78,11 @@ class LLMClient:
                 )
                 return resp.choices[0].message.content or ""
             except Exception as exc:  # pragma: no cover
-                logger.warning("LLM call failed, using mock: %s", exc)
+                # A configured provider that fails (auth/quota/model/network) is a
+                # real misconfiguration -- surface it clearly instead of silently
+                # returning mock answers that look like a working LLM.
+                logger.error("LLM call failed: %s", exc)
+                raise ProviderError(describe_provider_error("LLM", exc), detail=str(exc)) from exc
         return self._mock_complete(messages)
 
     def stream(self, messages: list[Message], temperature: float = 0.2) -> Iterator[str]:
@@ -74,7 +100,8 @@ class LLMClient:
                         yield delta
                 return
             except Exception as exc:  # pragma: no cover
-                logger.warning("LLM stream failed, using mock: %s", exc)
+                logger.error("LLM stream failed: %s", exc)
+                raise ProviderError(describe_provider_error("LLM", exc), detail=str(exc)) from exc
         # Mock streaming: yield token-by-token.
         text = self._mock_complete(messages)
         for token in re.findall(r"\S+\s*", text):

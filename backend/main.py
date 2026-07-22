@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api import chat, documents, evaluation, upload
 from app.config import BACKEND_DIR, settings
 from app.db import init_db
+from app.errors import ProviderError
 from app.llm import get_llm
 from app.logging import get_logger
 from rag.ingest import ingest_file
@@ -35,6 +37,17 @@ app.include_router(upload.router)
 app.include_router(chat.router)
 app.include_router(evaluation.router)
 app.include_router(documents.router)
+
+
+@app.exception_handler(ProviderError)
+def _provider_error_handler(request: Request, exc: ProviderError) -> JSONResponse:
+    """Turn a configured-provider failure into a friendly HTTP 502.
+
+    This keeps the raw upstream body (e.g. ``{"error":{"code":"1001"...}}``) out
+    of the client response and gives an actionable Chinese message instead.
+    """
+    logger.error("ProviderError: %s | detail=%s", exc.message, exc.detail)
+    return JSONResponse(status_code=502, content={"detail": exc.message})
 
 
 def _store_is_compatible(store) -> bool:
@@ -76,8 +89,18 @@ def seed_knowledge_base() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    llm = get_llm()
     logger.info("LLM mode: %s | embedding: %s | reranker: %s",
-                get_llm().mode, settings.embedding_backend, settings.reranker_backend)
+                llm.mode, settings.embedding_backend, settings.reranker_backend)
+    # Validate the configured provider up-front so an invalid/expired API key or
+    # unavailable model surfaces as a clear startup log rather than a confusing
+    # per-request failure later on.
+    if settings.has_llm:
+        ok, message = llm.verify()
+        if ok:
+            logger.info("LLM 凭证校验通过：%s", message)
+        else:
+            logger.error("LLM 凭证校验失败：%s", message)
     seed_knowledge_base()
 
 

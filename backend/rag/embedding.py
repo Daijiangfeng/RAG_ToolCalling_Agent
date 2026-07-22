@@ -20,6 +20,7 @@ import re
 from abc import ABC, abstractmethod
 
 from app.config import settings
+from app.errors import ProviderError, describe_provider_error
 from app.logging import get_logger
 
 logger = get_logger(__name__)
@@ -79,10 +80,17 @@ class OpenAIEmbedding(Embedder):
         # Zhipu / OpenAI embeddings APIs cap the number of inputs per request,
         # so send in batches of 64 and concatenate the results.
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), 64):
-            batch = texts[start:start + 64]
-            resp = self._client.embeddings.create(model=self._model, input=batch)
-            vectors.extend(d.embedding for d in resp.data)
+        try:
+            for start in range(0, len(texts), 64):
+                batch = texts[start:start + 64]
+                resp = self._client.embeddings.create(model=self._model, input=batch)
+                vectors.extend(d.embedding for d in resp.data)
+        except Exception as exc:
+            # Mirror the LLM client: a configured embedding provider that fails at
+            # runtime (auth/quota/model) must raise a clear, user-facing error
+            # instead of leaking the raw provider body as an HTTP 500.
+            logger.error("OpenAI embedding call failed: %s", exc)
+            raise ProviderError(describe_provider_error("向量模型", exc), detail=str(exc)) from exc
         if vectors:
             self.dim = len(vectors[0])
         return vectors

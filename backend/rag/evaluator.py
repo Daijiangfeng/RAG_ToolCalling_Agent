@@ -13,23 +13,35 @@ A markdown report is written to ``backend/evaluation_report.md``.
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app.config import BACKEND_DIR
 from app.logging import get_logger
+from rag.text import tokenize
 
 logger = get_logger(__name__)
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]+")
 TESTSET_PATH = BACKEND_DIR / "data" / "eval" / "testset.json"
 REPORT_PATH = BACKEND_DIR / "evaluation_report.md"
+BASELINE_PATH = BACKEND_DIR / "data" / "eval" / "baseline.json"
+
+# Regression tolerances (absolute). "higher is better" metrics flag a regression
+# when they drop by more than the tolerance; hallucination_rate is inverted.
+_REGRESSION_TOLERANCE = 0.05
+_HIGHER_IS_BETTER = {
+    "retrieval.precision_at_k",
+    "retrieval.recall_at_k",
+    "generation.answer_relevance",
+    "generation.context_relevance",
+    "generation.faithfulness",
+}
+_LOWER_IS_BETTER = {"safety.hallucination_rate"}
 
 
 def _tokens(text: str) -> set[str]:
-    return set(_TOKEN_RE.findall((text or "").lower()))
+    return set(tokenize(text))
 
 
 def _overlap_ratio(a: str, b: str) -> float:
@@ -120,6 +132,66 @@ def _avg(values: list[float]) -> float:
     return round(sum(values) / len(values), 4) if values else 0.0
 
 
+def _metric(summary: dict[str, Any], dotted: str) -> float | None:
+    node: Any = summary
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    try:
+        return float(node)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_baseline(path: Path | None = None) -> dict[str, Any] | None:
+    path = path or BASELINE_PATH
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to read baseline %s (%s)", path, exc)
+        return None
+
+
+def compare_to_baseline(
+    summary: dict[str, Any],
+    baseline: dict[str, Any] | None = None,
+    tolerance: float = _REGRESSION_TOLERANCE,
+) -> dict[str, Any]:
+    """Compare ``summary`` against a baseline snapshot.
+
+    Advisory only: this never raises and never changes control flow.  A metric
+    is flagged when it moves in the worse direction by more than ``tolerance``.
+    Returns ``{"available": bool, "regressions": [...], "deltas": {...}}``.
+    """
+    baseline = baseline if baseline is not None else load_baseline()
+    if not baseline:
+        return {"available": False, "regressions": [], "deltas": {}}
+
+    deltas: dict[str, dict[str, float]] = {}
+    regressions: list[dict[str, Any]] = []
+    for metric in _HIGHER_IS_BETTER | _LOWER_IS_BETTER:
+        cur = _metric(summary, metric)
+        base = _metric(baseline, metric)
+        if cur is None or base is None:
+            continue
+        delta = round(cur - base, 4)
+        deltas[metric] = {"current": cur, "baseline": base, "delta": delta}
+        if metric in _HIGHER_IS_BETTER and delta < -tolerance:
+            regressions.append({"metric": metric, "current": cur, "baseline": base, "delta": delta})
+        elif metric in _LOWER_IS_BETTER and delta > tolerance:
+            regressions.append({"metric": metric, "current": cur, "baseline": base, "delta": delta})
+
+    for r in regressions:
+        logger.warning(
+            "Evaluation regression: %s %.4f -> %.4f (delta %.4f, tolerance %.2f)",
+            r["metric"], r["baseline"], r["current"], r["delta"], tolerance,
+        )
+    return {"available": True, "regressions": regressions, "deltas": deltas}
+
+
 def run_evaluation(write_report: bool = True) -> dict[str, Any]:
     cases = load_testset()
     if not cases:
@@ -153,6 +225,8 @@ def run_evaluation(write_report: bool = True) -> dict[str, Any]:
             "faithfulness": _avg([r["faithfulness"] for r in subset]),
         }
 
+    summary["regression"] = compare_to_baseline(summary)
+
     if write_report:
         _write_report(summary, results)
     return summary
@@ -184,6 +258,22 @@ def _write_report(summary: dict[str, Any], results: list[dict[str, Any]]) -> Non
     ]
     for ctype, v in summary["per_type"].items():
         lines.append(f"| {ctype} | {v['count']} | {v['passed']} | {v['faithfulness']} |")
+
+    regression = summary.get("regression") or {}
+    lines += ["", "## Regression vs Baseline", ""]
+    if not regression.get("available"):
+        lines.append("No baseline found (backend/data/eval/baseline.json). Run once to establish one.")
+    else:
+        regs = regression.get("regressions", [])
+        if regs:
+            lines += [f"WARNING: {len(regs)} metric(s) regressed beyond tolerance (advisory, non-blocking).", ""]
+        else:
+            lines += ["No regression beyond tolerance.", ""]
+        lines += ["| Metric | Baseline | Current | Delta |", "| ------ | -------- | ------- | ----- |"]
+        for metric, d in sorted(regression.get("deltas", {}).items()):
+            flag = " (regressed)" if any(r["metric"] == metric for r in regs) else ""
+            lines.append(f"| {metric}{flag} | {d['baseline']} | {d['current']} | {d['delta']:+.4f} |")
+
     lines += ["", "## Per-case Detail", "", "| ID | Type | Behaved | Tools | Confidence |", "| -- | ---- | ------- | ----- | ---------- |"]
     for r in results:
         lines.append(

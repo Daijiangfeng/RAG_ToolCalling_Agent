@@ -15,20 +15,14 @@ and README can show the before/after effect.
 from __future__ import annotations
 
 import math
-import re
 from abc import ABC, abstractmethod
 from typing import Any
 
 from app.config import settings
 from app.logging import get_logger
+from rag.text import tokenize
 
 logger = get_logger(__name__)
-
-_TOKEN_RE = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]+")
-
-
-def _tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
 
 
 class Reranker(ABC):
@@ -69,13 +63,21 @@ class Reranker(ABC):
 
 
 class LexicalReranker(Reranker):
-    """Offline reranker: cosine of IDF-weighted token overlap vectors."""
+    """Offline reranker: IDF-weighted *query coverage* (absolute 0..1).
+
+    The score is the share of the query's IDF mass that the document actually
+    covers.  It is deliberately **not** normalised to the candidate-set maximum:
+    a max-normalised score would force the best candidate to 1.0 even for an
+    off-topic question, defeating the downstream confidence threshold used to
+    trigger rejection.  An absolute coverage score is high for relevant docs and
+    low for unrelated ones, so it doubles as a meaningful confidence signal.
+    """
 
     def score(self, query: str, docs: list[dict[str, Any]]) -> list[float]:
-        q_tokens = _tokens(query)
+        q_tokens = tokenize(query)
         if not q_tokens:
             return [float(d.get("score", 0.0)) for d in docs]
-        doc_tokens = [_tokens(d["text"]) for d in docs]
+        doc_tokens = [tokenize(d["text"]) for d in docs]
 
         # IDF over the candidate set.
         df: dict[str, int] = {}
@@ -85,23 +87,17 @@ class LexicalReranker(Reranker):
         n = len(docs)
         idf = {t: math.log((n + 1) / (c + 0.5)) + 1.0 for t, c in df.items()}
 
-        scores = []
         q_set = set(q_tokens)
+        q_idf_total = sum(idf.get(t, 1.0) for t in q_set)
+
+        scores = []
         for toks in doc_tokens:
-            if not toks:
+            if not toks or q_idf_total <= 0:
                 scores.append(0.0)
                 continue
-            counts: dict[str, int] = {}
-            for t in toks:
-                counts[t] = counts.get(t, 0) + 1
-            overlap = sum(idf.get(t, 1.0) * counts.get(t, 0) for t in q_set)
-            length_norm = math.sqrt(len(toks))
-            scores.append(overlap / length_norm if length_norm else 0.0)
-
-        # Normalise to 0..1 so it doubles as a confidence signal.
-        mx = max(scores) if scores else 0.0
-        if mx > 0:
-            scores = [s / mx for s in scores]
+            present = q_set & set(toks)
+            covered = sum(idf.get(t, 1.0) for t in present)
+            scores.append(covered / q_idf_total)
         return scores
 
 
