@@ -2,7 +2,7 @@
 
 > 企业级 **RAG + Tool Calling Agent** 平台 — 基于 **LangGraph** 的自主 Agent、完整 RAG 链路（检索 → 重排 → 压缩 → 生成）、工具调用、来源引用、不确定拒答、自动评估与 Streaming 输出。前端提供 Chat / Agent Trace / Knowledge Base / Evaluation 四个页面。
 
-本项目采用 **混合 + 离线兜底** 策略:默认对接 OpenAI 兼容 API + BGE 模型;当缺少 `OPENAI_API_KEY` 或本地模型不可用时，自动降级为 **mock LLM / 哈希向量 embedding / 词法 reranker / 内存向量库**，因此 **无需任何密钥即可跑通全部 Demo 与测试**。
+本项目采用 **混合 + 离线兜底** 策略:默认对接 **智谱 GLM**（OpenAI 兼容 API）+ 可选 BGE 模型;当 **未配置** `OPENAI_API_KEY` 时，自动降级为 **mock LLM / 哈希向量 embedding / 词法 reranker / 内存向量库**，因此 **无需任何密钥即可跑通全部 Demo 与测试**。而当 **已配置密钥但鉴权 / 额度 / 模型不可用** 时，平台会 **启动即校验** 并返回 **清晰的中文错误（HTTP 502）**，不再静默退回 mock 以免误导。
 
 ---
 
@@ -43,6 +43,7 @@
 - 📊 RAG 自动评估（Precision@K / Recall@K / Faithfulness / Answer & Context Relevance / Hallucination Rate）
 - ⚡ Streaming 输出（SSE）
 - 🧩 Advanced RAG：Query Rewrite / HyDE / Agentic RAG
+- 🔐 **Provider 健康校验**：启动即校验凭证，鉴权 / 额度 / 模型错误给出可操作的中文提示（HTTP 502），而非静默退回 mock
 
 ---
 
@@ -66,14 +67,16 @@
                 │                                                │ conditional routing
         ┌───────▼─────────────────────────────┐     ┌────────────▼───────────┐   ┌──────────────┐
         │  VectorStore (Chroma / InMemory)     │◄────│  Retriever → Reranker  │   │   Tools      │
-        │  Embedder (OpenAI / BGE / Hash)      │     │  → Generator (LLM)     │   │ calc/search/ │
+        │  Embedder (智谱/OpenAI / BGE / Hash) │     │  → Generator (LLM)     │   │ calc/search/ │
         └──────────────────────────────────────┘     └────────────────────────┘   │ file/datetime│
                                                                                     └──────────────┘
         ┌──────────────────────────────────────┐     ┌────────────────────────┐
-        │  SQLite (Document / ChatTrace)        │     │  LLMClient (OpenAI /    │
-        │                                       │     │  mock offline fallback) │
+        │  SQLite (Document / ChatTrace)        │     │  LLMClient (智谱/OpenAI │
+        │                                       │     │  + mock offline fallback)│
         └──────────────────────────────────────┘     └────────────────────────┘
 ```
+
+> 说明:LLM / Embedding 调用统一走 `ProviderError` 语义 —— 已配置密钥时的鉴权 / 额度 / 模型失败会被 `main.py` 的异常处理器转成友好的 **HTTP 502**（不泄漏智谱原始 `{"code":"1001"}` 报文）；未配置密钥则安静地走离线兜底。
 
 ---
 
@@ -83,8 +86,8 @@
 | --- | --- |
 | 后端 | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2, Uvicorn |
 | Agent | **LangGraph** (StateGraph), langchain-core |
-| LLM | OpenAI 兼容 SDK（OpenAI / Azure / DeepSeek / Qwen …）+ 离线 mock |
-| Embedding | OpenAI / BGE (sentence-transformers) / Hash（离线兜底） |
+| LLM | OpenAI 兼容 SDK（**智谱 GLM** / OpenAI / Azure / DeepSeek / Qwen …）+ 离线 mock |
+| Embedding | 智谱 / OpenAI / BGE (sentence-transformers) / Hash（离线兜底） |
 | 向量库 | Chroma（持久化）/ InMemory（离线兜底），接口可扩展 Milvus/Qdrant |
 | Reranker | Cross-Encoder (BAAI/bge-reranker-large) / Lexical（离线兜底） |
 | 文档解析 | PyMuPDF (PDF)、Markdown 解析 |
@@ -105,10 +108,10 @@
 
 - **Loader** (`rag/loader.py`)：PDF 逐页解析（保留页码），Markdown 按标题记录 heading。
 - **Splitter** (`rag/splitter.py`)：`RecursiveCharacterSplitter`，`chunk_size=800 / overlap=150`，按 `["\n\n","\n","。",". "," ",""]` 递归切分，保留 heading/page_number，输出 chunk_id。
-- **Embedding** (`rag/embedding.py`)：`OpenAIEmbedding` / `BGEEmbedding` / `HashEmbedding`，工厂按 `EMBEDDING_BACKEND` 选择并自动降级。
-- **VectorStore** (`rag/vectorstore.py`)：`ChromaStore`（持久化）/ `InMemoryStore`（余弦），统一 `add/query/count/reset` 接口。
+- **Embedding** (`rag/embedding.py`)：`OpenAIEmbedding`（智谱 `embedding-3` 等兼容接口）/ `BGEEmbedding` / `HashEmbedding`，工厂按 `EMBEDDING_BACKEND` 选择；**未配置密钥**时自动降级为 Hash，**已配置但调用失败**时抛出 `ProviderError`（清晰报错，不静默降级）。
+- **VectorStore** (`rag/vectorstore.py`)：`ChromaStore`（持久化）/ `InMemoryStore`（余弦），统一 `add/query/count/reset` 接口；切换 embedding 模型导致维度不一致时启动会自动重建集合。
 - **Retriever** (`rag/retriever.py`)：`similarity_search(query, top_k)`，返回带 score 候选。
-- **Reranker** (`rag/reranker.py`)：`CrossEncoderReranker` / `LexicalReranker`；`rerank(query, docs, top_n)` 与 `rerank_compare()`（返回重排前后顺序对比）。
+- **Reranker** (`rag/reranker.py`)：`CrossEncoderReranker` / `LexicalReranker`（离线兜底：**IDF 加权查询覆盖率**打分，中英文分别按 **字 / 词** 切分，分值为绝对值 0..1 —— 既用于排序也直接作为置信度信号）；提供 `rerank(query, docs, top_n)` 与 `rerank_compare()`（返回重排前后顺序对比）。
 - **Context Compression** (`rag/generator.py`)：按 rerank 分数截断/去冗余。
 - **Generator** (`rag/generator.py`)：System Prompt 强约束（只依据上下文 / 禁编造 / 必引用 / 信息不足拒答），支持 `generate` 与 `generate_stream`。
 
@@ -153,7 +156,7 @@ Agent 使用 **StateGraph**（`agent/graph.py`），状态定义见 `agent/state
 
 - **intent_router** (`agent/router.py`)：规则优先 + LLM 兜底，判定 `intent / need_rag / need_tool / tool_name`（纯算术→calculator，日期时间关键词→datetime，"最新/实时/新闻"→web_search，文件→file_query，其余→RAG）。
 - **节点** (`agent/nodes.py`)：`rewrite_node` / `retrieve_node` / `rerank_node` / `tool_node` / `generate_node` / `critique_node` / `reject_node`，每个节点向 `trace` 追加 `{step, summary, tool}`（仅 reasoning summary，不暴露完整思维链）。
-- **条件边**：`_route_after_router`、`_route_after_rerank`（拒答控制）、`_route_after_critique`（Self-Critique 失败重生成一次）。
+- **条件边**：`_route_after_router`、`_route_after_rerank`（拒答控制：`rerank_node` 以最高覆盖率分作为 `confidence`，低于 `CONFIDENCE_THRESHOLD` 或无上下文即转 `reject`）、`_route_after_critique`（Self-Critique 失败重生成一次）。
 - **memory** (`agent/memory.py`)：轻量会话记忆，供 Query Rewrite 指代消解。
 
 ---
@@ -219,6 +222,7 @@ uvicorn main:app --reload --port 8000
 - 健康检查: http://localhost:8000/api/health
 
 > 首次启动会自动把 `backend/data/seed_docs/` 的示例文档入库，Demo/评估开箱即用。
+> 若配置了 `OPENAI_API_KEY`，启动日志会打印 `LLM 凭证校验通过/失败`，可据此第一时间发现密钥 / 模型问题。
 
 ### 前端
 
@@ -241,10 +245,10 @@ docker compose up --build
 - 前端: http://localhost:3000
 - 后端: http://localhost:8000/docs
 
-默认离线模式运行。若要接入真实模型，在启动前设置环境变量（或写入根目录 `.env`）:
+默认离线模式运行。若要接入真实模型（示例为智谱 GLM），在启动前设置环境变量（或写入根目录 `.env`）:
 
 ```bash
-OPENAI_API_KEY=sk-xxx EMBEDDING_BACKEND=openai docker compose up --build
+OPENAI_API_KEY=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai docker compose up --build
 ```
 
 > 说明:后端使用 **内嵌 Chroma PersistentClient**，数据通过命名卷 `backend_data` 持久化（挂载到 `/app/data`）。
@@ -255,20 +259,23 @@ OPENAI_API_KEY=sk-xxx EMBEDDING_BACKEND=openai docker compose up --build
 
 见 `backend/.env.example`。关键项:
 
-| 变量 | 默认                                     | 说明 |
-| --- |----------------------------------------| --- |
-| `MODEL_NAME` | ` glm-4.5-air`                         | LLM 模型名 |
-| `OPENAI_API_KEY` | 空                                      | **留空即离线 mock 模式** |
-| `OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 兼容 API 地址 |
-| `EMBEDDING_BACKEND` | `openai`                               | `openai` / `bge` / `hash` |
-| `RERANKER_BACKEND` | `lexical`                              | `cross-encoder` / `lexical` |
-| `VECTOR_BACKEND` | `chroma`                               | `chroma` / `memory` |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `150`                          | 切分参数 |
-| `TOP_K` / `RERANK_TOP_N` | `20` / `5`                             | 检索/重排数量 |
-| `CONFIDENCE_THRESHOLD` | `0.30`                                 | 拒答置信度阈值 |
-| `WEB_SEARCH_PROVIDER` | `mock`                                 | `tavily` / `serpapi` / `mock` |
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `MODEL_NAME` | `glm-4.5-air` | LLM 模型名（智谱示例:`glm-4.5-air` / `glm-4.6v` / `glm-4-flash`） |
+| `OPENAI_API_KEY` | 空 | **留空即离线 mock 模式**；智谱为 `id.secret` 形式直接填入即可 |
+| `OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 兼容 API 地址（默认智谱） |
+| `EMBEDDING_BACKEND` | `hash` | `openai`（如智谱 `embedding-3`）/ `bge` / `hash` |
+| `OPENAI_EMBEDDING_MODEL` | `embedding-3` | `EMBEDDING_BACKEND=openai` 时的向量模型名 |
+| `RERANKER_BACKEND` | `lexical` | `cross-encoder` / `lexical` |
+| `VECTOR_BACKEND` | `chroma` | `chroma` / `memory` |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `150` | 切分参数 |
+| `TOP_K` / `RERANK_TOP_N` | `20` / `5` | 检索/重排数量 |
+| `CONFIDENCE_THRESHOLD` | `0.30` | 拒答置信度阈值 |
+| `WEB_SEARCH_PROVIDER` | `mock` | `tavily` / `serpapi` / `mock` |
 
-启用本地 BGE 模型需在 `requirements.txt` 取消注释 `sentence-transformers` 与 `torch` 并安装。
+- 启用本地 BGE 模型需在 `requirements.txt` 取消注释 `sentence-transformers` 与 `torch` 并安装。
+- **切换 embedding 后端后请重建知识库**：库内向量与查询向量必须来自同一 embedder，否则检索会失效（启动时会尝试自动重建，也可删除 `backend/data/chroma` 后重新入库）。
+- 配置了密钥但鉴权 / 额度 / 模型失败时，相关请求返回 **HTTP 502 + 中文提示**（而非 500 泄漏原始报文），并在启动日志中标记。
 
 ---
 
@@ -284,6 +291,8 @@ OPENAI_API_KEY=sk-xxx EMBEDDING_BACKEND=openai docker compose up --build
 | `POST` | `/api/evaluation/run` | 运行评估集并生成 `evaluation_report.md` |
 | `GET` | `/api/health` | 健康检查（含 LLM 模式、向量数） |
 
+> 当配置的 Provider 调用失败（鉴权 / 额度 / 模型），`/api/chat`、`/api/upload` 等接口统一返回 **HTTP 502**，响应体形如 `{"detail":"LLM鉴权失败：… 请检查 backend/.env 中的 OPENAI_API_KEY …"}`。
+
 **Chat 请求示例**
 
 ```bash
@@ -296,7 +305,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ## 13. Demo 说明
 
-平台在 **离线兜底模式** 下即可演示以下 4 个场景:
+平台在 **离线兜底模式** 下即可演示以下 4 个场景（接入智谱 GLM 后效果更佳）:
 
 - **Demo 1 · RAG 问答带来源**：上传 PDF/MD 后提问"RAG 的优势是什么?"，返回答案 + Sources 引用卡片（文件名/页码/score）。
 - **Demo 2 · 实时信息 → web_search**：提问"最新的 AI 新闻"，Agent 路由到 `web_search` 工具，Trace 显示工具调用。
@@ -351,7 +360,7 @@ cd backend
 ```
 RAG_ToolCalling_Agent/
 ├── backend/
-│   ├── app/         # config, db, models, schemas, logging, llm
+│   ├── app/         # config, db, models, schemas, logging, llm, errors
 │   ├── rag/         # loader, splitter, embedding, vectorstore, retriever,
 │   │                # reranker, generator, advanced, evaluator, ingest
 │   ├── agent/       # state, router, nodes, graph, memory (LangGraph)
