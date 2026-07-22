@@ -1,6 +1,6 @@
 """LLM client wrapper around any OpenAI-compatible API.
 
-When no ``OPENAI_API_KEY`` is configured (or the SDK/network is unavailable) the
+When no ``AUTH_TOKEN`` is configured (or the SDK/network is unavailable) the
 client transparently falls back to a deterministic *mock* implementation so that
 the whole platform, its demos and its test-suite remain fully runnable offline.
 """
@@ -27,8 +27,10 @@ class LLMClient:
             try:  # pragma: no cover - depends on optional network/SDK
                 from openai import OpenAI
 
+                # 智谱 GLM 兼容 OpenAI 协议：auth_token 作为 Bearer 令牌，SDK 会
+                # 自动以 ``Authorization: Bearer <token>`` 发送。
                 self._client = OpenAI(
-                    api_key=settings.openai_api_key,
+                    api_key=settings.auth_token,
                     base_url=settings.openai_base_url,
                 )
                 self._mode = "openai"
@@ -38,7 +40,7 @@ class LLMClient:
                 self._client = None
                 self._mode = "mock"
         else:
-            logger.info("No OPENAI_API_KEY set -> LLMClient running in offline mock mode")
+            logger.info("No AUTH_TOKEN set -> LLMClient running in offline mock mode")
 
     @property
     def mode(self) -> str:
@@ -53,7 +55,7 @@ class LLMClient:
         runtime failure into an explicit, actionable startup log.
         """
         if self._client is None:
-            return True, "离线 mock 模式（未配置 OPENAI_API_KEY）"
+            return True, "离线 mock 模式（未配置 AUTH_TOKEN）"
         try:  # pragma: no cover - network
             self._client.chat.completions.create(
                 model=settings.model_name,

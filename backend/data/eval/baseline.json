@@ -1,0 +1,38 @@
+{
+  "total": 20,
+  "retrieval": {
+    "precision_at_k": 0.22,
+    "recall_at_k": 0.4375
+  },
+  "generation": {
+    "answer_relevance": 0.2441,
+    "context_relevance": 0.0815,
+    "faithfulness": 0.3719
+  },
+  "safety": {
+    "hallucination_rate": 0.25
+  },
+  "per_type": {
+    "knowledge": {
+      "count": 5,
+      "passed": 5,
+      "faithfulness": 0.7367
+    },
+    "multi_hop": {
+      "count": 5,
+      "passed": 5,
+      "faithfulness": 0.7511
+    },
+    "no_answer": {
+      "count": 5,
+      "passed": 0,
+      "faithfulness": 0.0
+    },
+    "tool": {
+      "count": 5,
+      "passed": 5,
+      "faithfulness": 0.0
+    }
+  },
+  "generated_at": "2026-07-22T06:01:52.636594"
+}

@@ -72,7 +72,7 @@ class OpenAIEmbedding(Embedder):
     def __init__(self) -> None:
         from openai import OpenAI
 
-        self._client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+        self._client = OpenAI(api_key=settings.auth_token, base_url=settings.openai_base_url)
         self._model = settings.openai_embedding_model
         self.dim = settings.embedding_dim
 

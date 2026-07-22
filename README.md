@@ -2,7 +2,7 @@
 
 > 企业级 **RAG + Tool Calling Agent** 平台 — 基于 **LangGraph** 的自主 Agent、完整 RAG 链路（检索 → 重排 → 压缩 → 生成）、工具调用、来源引用、不确定拒答、自动评估与 Streaming 输出。前端提供 Chat / Agent Trace / Knowledge Base / Evaluation 四个页面。
 
-本项目采用 **混合 + 离线兜底** 策略:默认对接 **智谱 GLM**（OpenAI 兼容 API）+ 可选 BGE 模型;当 **未配置** `OPENAI_API_KEY` 时，自动降级为 **mock LLM / 哈希向量 embedding / 词法 reranker / 内存向量库**，因此 **无需任何密钥即可跑通全部 Demo 与测试**。而当 **已配置密钥但鉴权 / 额度 / 模型不可用** 时，平台会 **启动即校验** 并返回 **清晰的中文错误（HTTP 502）**，不再静默退回 mock 以免误导。
+本项目采用 **混合 + 离线兜底** 策略:默认对接 **智谱 GLM**（OpenAI 兼容 API）+ 可选 BGE 模型;当 **未配置** `AUTH_TOKEN`（智谱 Bearer 令牌）时，自动降级为 **mock LLM / 哈希向量 embedding / 词法 reranker / 内存向量库**，因此 **无需任何密钥即可跑通全部 Demo 与测试**。而当 **已配置密钥但鉴权 / 额度 / 模型不可用** 时，平台会 **启动即校验** 并返回 **清晰的中文错误（HTTP 502）**，不再静默退回 mock 以免误导。
 
 ---
 
@@ -222,7 +222,7 @@ uvicorn main:app --reload --port 8000
 - 健康检查: http://localhost:8000/api/health
 
 > 首次启动会自动把 `backend/data/seed_docs/` 的示例文档入库，Demo/评估开箱即用。
-> 若配置了 `OPENAI_API_KEY`，启动日志会打印 `LLM 凭证校验通过/失败`，可据此第一时间发现密钥 / 模型问题。
+> 若配置了 `AUTH_TOKEN`，启动日志会打印 `LLM 凭证校验通过/失败`，可据此第一时间发现密钥 / 模型问题。
 
 ### 前端
 
@@ -248,7 +248,7 @@ docker compose up --build
 默认离线模式运行。若要接入真实模型（示例为智谱 GLM），在启动前设置环境变量（或写入根目录 `.env`）:
 
 ```bash
-OPENAI_API_KEY=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai docker compose up --build
+AUTH_TOKEN=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai docker compose up --build
 ```
 
 > 说明:后端使用 **内嵌 Chroma PersistentClient**，数据通过命名卷 `backend_data` 持久化（挂载到 `/app/data`）。
@@ -262,7 +262,7 @@ OPENAI_API_KEY=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai docke
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `MODEL_NAME` | `glm-4.5-air` | LLM 模型名（智谱示例:`glm-4.5-air` / `glm-4.6v` / `glm-4-flash`） |
-| `OPENAI_API_KEY` | 空 | **留空即离线 mock 模式**；智谱为 `id.secret` 形式直接填入即可 |
+| `AUTH_TOKEN` | 空 | **留空即离线 mock 模式**；智谱 Bearer 令牌，为 `id.secret` 形式直接填入即可（兼容旧名 `OPENAI_API_KEY`） |
 | `OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 兼容 API 地址（默认智谱） |
 | `EMBEDDING_BACKEND` | `hash` | `openai`（如智谱 `embedding-3`）/ `bge` / `hash` |
 | `OPENAI_EMBEDDING_MODEL` | `embedding-3` | `EMBEDDING_BACKEND=openai` 时的向量模型名 |
@@ -291,7 +291,7 @@ OPENAI_API_KEY=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai docke
 | `POST` | `/api/evaluation/run` | 运行评估集并生成 `evaluation_report.md` |
 | `GET` | `/api/health` | 健康检查（含 LLM 模式、向量数） |
 
-> 当配置的 Provider 调用失败（鉴权 / 额度 / 模型），`/api/chat`、`/api/upload` 等接口统一返回 **HTTP 502**，响应体形如 `{"detail":"LLM鉴权失败：… 请检查 backend/.env 中的 OPENAI_API_KEY …"}`。
+> 当配置的 Provider 调用失败（鉴权 / 额度 / 模型），`/api/chat`、`/api/upload` 等接口统一返回 **HTTP 502**，响应体形如 `{"detail":"LLM鉴权失败：… 请检查 backend/.env 中的 AUTH_TOKEN …"}`。
 
 **Chat 请求示例**
 

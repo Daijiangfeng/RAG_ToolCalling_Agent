@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -31,8 +32,13 @@ class Settings(BaseSettings):
     )
 
     # --- LLM (OpenAI compatible) -----------------------------------------
+    # 智谱 GLM 使用 AUTH_TOKEN 作为 Bearer 令牌（Authorization: Bearer <token>）。
+    # 兼容旧的 OPENAI_API_KEY 变量名，便于平滑迁移。
     model_name: str = "glm-4.5-air"
-    openai_api_key: str = ""
+    auth_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("AUTH_TOKEN", "OPENAI_API_KEY"),
+    )
     openai_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
 
     # --- Embedding --------------------------------------------------------
@@ -72,7 +78,7 @@ class Settings(BaseSettings):
 
     @property
     def has_llm(self) -> bool:
-        return bool(self.openai_api_key)
+        return bool(self.auth_token)
 
     @property
     def rejection_message(self) -> str:

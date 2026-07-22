@@ -14,6 +14,7 @@ from pathlib import Path
 
 # --- Environment must be set BEFORE importing app modules -------------------
 _TMP = Path(tempfile.mkdtemp(prefix="rag_test_"))
+os.environ.setdefault("AUTH_TOKEN", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 os.environ["EMBEDDING_BACKEND"] = "hash"
 os.environ["RERANKER_BACKEND"] = "lexical"

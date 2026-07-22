@@ -3,7 +3,8 @@
 # - frontend: React SPA served by nginx, proxies /api -> backend
 #
 # The backend runs fully offline by default (mock LLM + hash embedding +
-# lexical reranker). Provide OPENAI_API_KEY (and optionally switch
+# lexical reranker). Provide AUTH_TOKEN (智谱 Bearer 令牌; 兼容旧名 OPENAI_API_KEY)
+# (and optionally switch
 # EMBEDDING_BACKEND=openai / RERANKER_BACKEND=cross-encoder) to use real models.
 services:
   backend:
@@ -12,8 +13,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # --- LLM (智谱 GLM, OpenAI 兼容; 留空 OPENAI_API_KEY 则离线 mock) ---
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # --- LLM (智谱 GLM, OpenAI 兼容; 留空 AUTH_TOKEN 则离线 mock; AUTH_TOKEN 为 Bearer 令牌) ---
+      AUTH_TOKEN: "${AUTH_TOKEN:-}"
       OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
       MODEL_NAME: "${MODEL_NAME:-glm-4.5-air}"
       # --- RAG backends ---
