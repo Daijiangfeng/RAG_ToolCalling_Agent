@@ -1,4 +1,4 @@
-import { Card, Timeline, Tag, Typography, Empty } from "antd";
+import { Timeline, Tag, Typography, Empty } from "antd";
 import {
   BranchesOutlined,
   SearchOutlined,
@@ -11,6 +11,8 @@ import {
 } from "@ant-design/icons";
 import { useChatStore } from "../stores/chatStore";
 import type { TraceStep } from "../types";
+import PageContainer from "../components/PageContainer";
+import SectionCard from "../components/SectionCard";
 
 const { Text, Paragraph } = Typography;
 
@@ -51,11 +53,11 @@ function stepStyle(step: string): { icon: React.ReactNode; color: string } {
 }
 
 export default function TracePage() {
-  const { lastTrace } = useChatStore();
+  const lastTrace = useChatStore((s) => s.lastTrace);
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
-      <Card title="Agent 执行轨迹 (LangGraph State → Node → Edge)">
+    <PageContainer maxWidth={900}>
+      <SectionCard title="Agent 执行轨迹 (LangGraph State → Node → Edge)">
         {lastTrace.length === 0 ? (
           <Empty description="尚无轨迹,请先在对话页发起一次提问" />
         ) : (
@@ -87,7 +89,7 @@ export default function TracePage() {
             })}
           />
         )}
-      </Card>
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

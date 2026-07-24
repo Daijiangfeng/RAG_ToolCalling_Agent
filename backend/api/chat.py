@@ -16,6 +16,15 @@ from app.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+# CJK（中日韩）单字与非 CJK 词块分别成一个流式 token：
+# 中文答案没有空格，原先的 \S+ 会把整段中文当成一个 token，导致中文场景没有
+# 逐字流式效果。这里对 CJK 逐字切分，其余按“词 + 尾随空白”切分。
+_STREAM_TOKEN = re.compile(
+    r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]"
+    r"|\S+\s*"
+    r"|\s+"
+)
+
 
 def _persist(db: Session, req: ChatRequest, result: dict) -> None:
     db.add(
@@ -49,7 +58,7 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
 
     def event_gen():
         answer = result.get("answer", "")
-        for token in re.findall(r"\S+\s*|\s+", answer):
+        for token in _STREAM_TOKEN.findall(answer):
             yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
         done = {
             "type": "done",

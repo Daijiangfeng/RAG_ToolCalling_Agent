@@ -1,19 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  Card,
-  Row,
-  Col,
-  Statistic,
-  Button,
-  Table,
-  message,
-  Typography,
-  Progress,
-  Space,
-} from "antd";
+import { Row, Col, Statistic, Button, Table, App, Typography, Progress, Space, Empty } from "antd";
 import { PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { getEvaluation, runEvaluation } from "../api/client";
+import { getEvaluation, runEvaluation, toApiError } from "../api/client";
 import type { EvaluationResponse } from "../types";
+import { STATUS } from "../theme/tokens";
+import { formatDateTime } from "../utils/format";
+import PageContainer from "../components/PageContainer";
+import SectionCard from "../components/SectionCard";
 
 const { Text } = Typography;
 
@@ -21,7 +14,12 @@ function pct(v: number): number {
   return Math.round((v ?? 0) * 100);
 }
 
+// 统计卡在小屏下堆叠、大屏均分。
+const STAT_COL = { xs: 24, sm: 12, md: 6 };
+const STAT_COL_3 = { xs: 24, sm: 12, md: 8 };
+
 export default function EvaluationPage() {
+  const { message } = App.useApp();
   const [data, setData] = useState<EvaluationResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
@@ -30,8 +28,9 @@ export default function EvaluationPage() {
     setLoading(true);
     try {
       setData(await getEvaluation());
-    } catch {
-      message.info("暂无评估结果,请点击“运行评估”生成");
+    } catch (err) {
+      // 区分“暂无数据”与“真实错误”：仅在确有错误时告警。
+      message.error(toApiError(err).message || "获取评估结果失败,请确认后端已启动");
     } finally {
       setLoading(false);
     }
@@ -42,8 +41,8 @@ export default function EvaluationPage() {
     try {
       setData(await runEvaluation());
       message.success("评估完成");
-    } catch {
-      message.error("运行评估失败,请确认后端已启动");
+    } catch (err) {
+      message.error(toApiError(err).message || "运行评估失败,请确认后端已启动");
     } finally {
       setRunning(false);
     }
@@ -51,6 +50,7 @@ export default function EvaluationPage() {
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const perTypeRows = data
@@ -76,8 +76,8 @@ export default function EvaluationPage() {
   ];
 
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <Card
+    <PageContainer maxWidth={1000}>
+      <SectionCard
         title="RAG 自动评估看板"
         style={{ marginBottom: 16 }}
         extra={
@@ -85,12 +85,7 @@ export default function EvaluationPage() {
             <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
               刷新
             </Button>
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={run}
-              loading={running}
-            >
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={run} loading={running}>
               运行评估
             </Button>
           </Space>
@@ -98,71 +93,92 @@ export default function EvaluationPage() {
       >
         {data ? (
           <>
-            <Row gutter={16}>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic title="检索精确率 Precision@K" value={pct(data.retrieval.precision_at_k)} suffix="%" />
-                </Card>
+            <Row gutter={[16, 16]}>
+              <Col {...STAT_COL}>
+                <SectionCard size="small">
+                  <Statistic
+                    title="检索精确率 Precision@K"
+                    value={pct(data.retrieval.precision_at_k)}
+                    suffix="%"
+                  />
+                </SectionCard>
               </Col>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic title="检索召回率 Recall@K" value={pct(data.retrieval.recall_at_k)} suffix="%" />
-                </Card>
+              <Col {...STAT_COL}>
+                <SectionCard size="small">
+                  <Statistic
+                    title="检索召回率 Recall@K"
+                    value={pct(data.retrieval.recall_at_k)}
+                    suffix="%"
+                  />
+                </SectionCard>
               </Col>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic title="忠实度 Faithfulness" value={pct(data.generation.faithfulness)} suffix="%" />
-                </Card>
+              <Col {...STAT_COL}>
+                <SectionCard size="small">
+                  <Statistic
+                    title="忠实度 Faithfulness"
+                    value={pct(data.generation.faithfulness)}
+                    suffix="%"
+                  />
+                </SectionCard>
               </Col>
-              <Col span={6}>
-                <Card size="small">
+              <Col {...STAT_COL}>
+                <SectionCard size="small">
                   <Statistic
                     title="幻觉率"
                     value={pct(data.safety.hallucination_rate)}
                     suffix="%"
-                    valueStyle={{ color: "#cf1322" }}
+                    valueStyle={{ color: STATUS.danger }}
                   />
-                </Card>
+                </SectionCard>
               </Col>
             </Row>
 
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic title="答案相关性 Answer Relevance" value={pct(data.generation.answer_relevance)} suffix="%" />
-                </Card>
+            <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+              <Col {...STAT_COL_3}>
+                <SectionCard size="small">
+                  <Statistic
+                    title="答案相关性 Answer Relevance"
+                    value={pct(data.generation.answer_relevance)}
+                    suffix="%"
+                  />
+                </SectionCard>
               </Col>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic title="上下文相关性 Context Relevance" value={pct(data.generation.context_relevance)} suffix="%" />
-                </Card>
+              <Col {...STAT_COL_3}>
+                <SectionCard size="small">
+                  <Statistic
+                    title="上下文相关性 Context Relevance"
+                    value={pct(data.generation.context_relevance)}
+                    suffix="%"
+                  />
+                </SectionCard>
               </Col>
-              <Col span={8}>
-                <Card size="small">
+              <Col {...STAT_COL_3}>
+                <SectionCard size="small">
                   <Statistic title="测试样本数" value={data.total} />
-                </Card>
+                </SectionCard>
               </Col>
             </Row>
 
-            <Card size="small" title="分类别指标" style={{ marginTop: 16 }}>
+            <SectionCard size="small" title="分类别指标" style={{ marginTop: 16 }}>
               <Table
                 columns={columns}
                 dataSource={perTypeRows}
                 pagination={false}
                 size="small"
+                scroll={{ x: "max-content" }}
               />
-            </Card>
+            </SectionCard>
 
             {data.generated_at && (
               <Text type="secondary" style={{ display: "block", marginTop: 12 }}>
-                生成时间:{data.generated_at}
+                生成时间:{formatDateTime(data.generated_at)}
               </Text>
             )}
           </>
         ) : (
-          <Text type="secondary">暂无评估数据,请点击“运行评估”。</Text>
+          <Empty description="暂无评估数据,请点击“运行评估”生成" />
         )}
-      </Card>
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

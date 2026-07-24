@@ -1,5 +1,12 @@
 // Shared types mirroring the backend API contracts.
 
+// 归一化后的 API 错误：始终携带一个可展示给用户的 message，
+// 尽量还原后端返回的 detail（如 502 ProviderError 的友好文案）。
+export interface ApiError {
+  message: string;
+  status?: number;
+}
+
 export interface Source {
   text: string;
   score: number;

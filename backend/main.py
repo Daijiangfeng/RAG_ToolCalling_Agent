@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -25,10 +26,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# 解析允许的源；含通配符 "*" 时必须关闭 credentials（浏览器不允许
+# allow_origins=["*"] 与 allow_credentials=True 共存，否则 CORS 完全失效）。
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or ["*"]
+_allow_credentials = "*" not in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.cors_origins.split(",")] or ["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -92,6 +98,7 @@ def on_startup() -> None:
     llm = get_llm()
     logger.info("LLM mode: %s | embedding: %s | reranker: %s",
                 llm.mode, settings.embedding_backend, settings.reranker_backend)
+    _log_token_diagnostics()
     # Validate the configured provider up-front so an invalid/expired API key or
     # unavailable model surfaces as a clear startup log rather than a confusing
     # per-request failure later on.
@@ -102,6 +109,50 @@ def on_startup() -> None:
         else:
             logger.error("LLM 凭证校验失败：%s", message)
     seed_knowledge_base()
+
+
+_TOKEN_ENV_VARS = ("ANTHROPIC_AUTH_TOKEN", "AUTH_TOKEN", "OPENAI_API_KEY")
+
+
+def _mask_token(token: str) -> str:
+    """Mask a token for logging: keep a short prefix/suffix, hide the middle."""
+    if len(token) <= 8:
+        return "*" * len(token)
+    return f"{token[:4]}***{token[-3:]}"
+
+
+def _log_token_diagnostics() -> None:
+    """Surface the effective auth-token state so a blank/shadowed token is obvious.
+
+    智谱 code 1001（Header 中未收到 Authentication 参数）的根因通常是
+    有效令牌为空/纯空白，或被 shell 中的空环境变量遮盖了 backend/.env。
+    这里在启动日志中把有效令牌（掩码）与环境变量遮盖情况直接暴露出来。
+    """
+    shadowing = [name for name in _TOKEN_ENV_VARS if os.environ.get(name) is not None]
+    if settings.has_llm:
+        token = settings.auth_token
+        logger.info(
+            "LLM 凭证已加载（len=%d, mask=%s）%s",
+            len(token),
+            _mask_token(token),
+            f"；环境变量 {shadowing} 已设置并优先于 backend/.env" if shadowing else "",
+        )
+        return
+    # No usable token. Distinguish "nothing set" from "set but blank/whitespace",
+    # since the latter is the exact trigger for an empty Bearer header -> 1001.
+    blank_env = [
+        name for name in _TOKEN_ENV_VARS
+        if (raw := os.environ.get(name)) is not None and not raw.strip()
+    ]
+    if blank_env:
+        logger.warning(
+            "检测到空白的鉴权环境变量 %s，它会遮盖 backend/.env 中的令牌，"
+            "导致以空 Bearer 头调用智谱（code 1001）。请在启动 uvicorn/PyCharm 的 "
+            "shell 中清除这些变量，或赋予有效令牌。当前以离线 mock 模式运行。",
+            blank_env,
+        )
+    else:
+        logger.info("未配置 ANTHROPIC_AUTH_TOKEN -> 以离线 mock 模式运行。")
 
 
 @app.get("/api/health")
