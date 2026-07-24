@@ -1,6 +1,6 @@
 # RAG Evaluation Report
 
-Generated at: 2026-07-22T07:32:14.353533  
+Generated at: 2026-07-24T05:46:17.269484  
 Total cases: 20
 
 ## Retrieval
@@ -8,7 +8,7 @@ Total cases: 20
 - Recall@K: 0.325
 
 ## Generation
-- Answer Relevance: 0.2276
+- Answer Relevance: 0.2189
 - Context Relevance: 0.0686
 - Faithfulness: 0.3304
 
@@ -30,7 +30,7 @@ WARNING: 2 metric(s) regressed beyond tolerance (advisory, non-blocking).
 
 | Metric | Baseline | Current | Delta |
 | ------ | -------- | ------- | ----- |
-| generation.answer_relevance | 0.2441 | 0.2276 | -0.0165 |
+| generation.answer_relevance | 0.2441 | 0.2189 | -0.0252 |
 | generation.context_relevance | 0.0815 | 0.0686 | -0.0129 |
 | generation.faithfulness | 0.3719 | 0.3304 | -0.0415 |
 | retrieval.precision_at_k (regressed) | 0.22 | 0.1667 | -0.0533 |

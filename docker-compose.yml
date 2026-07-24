@@ -3,8 +3,8 @@
 # - frontend: React SPA served by nginx, proxies /api -> backend
 #
 # The backend runs fully offline by default (mock LLM + hash embedding +
-# lexical reranker). Provide AUTH_TOKEN (智谱 Bearer 令牌; 兼容旧名 OPENAI_API_KEY)
-# (and optionally switch
+# lexical reranker). Provide ANTHROPIC_AUTH_TOKEN (智谱 Bearer 令牌; 兼容旧名
+# AUTH_TOKEN / OPENAI_API_KEY) (and optionally switch
 # EMBEDDING_BACKEND=openai / RERANKER_BACKEND=cross-encoder) to use real models.
 services:
   backend:
@@ -13,10 +13,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # --- LLM (智谱 GLM, OpenAI 兼容; 留空 AUTH_TOKEN 则离线 mock; AUTH_TOKEN 为 Bearer 令牌) ---
-      AUTH_TOKEN: "${AUTH_TOKEN:-}"
-      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
+      # --- LLM (智谱 GLM, Anthropic 兼容端点; 留空 ANTHROPIC_AUTH_TOKEN 则离线 mock) ---
+      ANTHROPIC_AUTH_TOKEN: "${ANTHROPIC_AUTH_TOKEN:-}"
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}"
+      MAX_TOKENS: "${MAX_TOKENS:-1024}"
       MODEL_NAME: "${MODEL_NAME:-glm-4.5-air}"
+      # 向量 embedding 走智谱 OpenAI 兼容端点（复用同一个令牌）。
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
       # --- RAG backends ---
       EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-hash}"
       OPENAI_EMBEDDING_MODEL: "${OPENAI_EMBEDDING_MODEL:-embedding-3}"

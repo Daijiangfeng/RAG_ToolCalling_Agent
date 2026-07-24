@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -85,9 +85,19 @@ class Settings(BaseSettings):
     upload_dir: str = str(DATA_DIR / "uploads")
     cors_origins: str = "*"
 
+    @field_validator("auth_token", mode="before")
+    @classmethod
+    def _strip_auth_token(cls, value: object) -> str:
+        # 去除令牌两端的空白/换行：粘贴 .env 或 export 环境变量时常混入尾随
+        # 空格/换行，若原样发给 SDK 会得到空的 ``Authorization: Bearer ``，
+        # 触发智谱 code 1001（未收到 Authentication 参数）。
+        return str(value).strip() if value is not None else ""
+
     @property
     def has_llm(self) -> bool:
-        return bool(self.auth_token)
+        # 仅当去空白后仍非空才视为已配置令牌；纯空白视为未配置 -> 离线 mock，
+        # 避免发送空 Bearer 头导致的 1001 鉴权失败。
+        return bool(self.auth_token and self.auth_token.strip())
 
     @property
     def rejection_message(self) -> str:
