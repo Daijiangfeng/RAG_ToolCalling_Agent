@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from agent.graph import run_agent
+from agent.graph import run_agent, run_agent_streaming
 from app.db import get_db
 from app.models import ChatTrace
 from app.schemas import ChatRequest, ChatResponse
@@ -47,28 +47,24 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
 @router.post("/chat/stream")
 def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
-    """Server-Sent-Events stream: token deltas, then a final metadata event.
+    """Server-Sent-Events stream with true LLM token streaming.
 
-    The agent runs to completion first (so routing / retrieval / rerank / tools
-    are resolved), then the final answer is streamed token-by-token, followed by
-    a ``done`` event carrying sources / confidence / tools / trace.
+    The agent executes routing/retrieval/reranking first, then the generation
+    phase streams tokens in real-time as they arrive from the LLM. Tool-based
+    and rejection answers are emitted as a single chunk.
     """
-    result = run_agent(req.question, session_id=req.session_id)
-    _persist(db, req, result)
 
     def event_gen():
-        answer = result.get("answer", "")
-        for token in _STREAM_TOKEN.findall(answer):
-            yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
-        done = {
-            "type": "done",
-            "answer": answer,
-            "sources": result.get("sources", []),
-            "confidence": result.get("confidence", 0.0),
-            "tools": result.get("tools", []),
-            "trace": result.get("trace", []),
-            "intent": result.get("intent", ""),
-        }
-        yield f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
+        final_result = {}
+        for event_type, data in run_agent_streaming(req.question, session_id=req.session_id):
+            if event_type == "token":
+                yield f"data: {json.dumps({'type': 'token', 'content': data}, ensure_ascii=False)}\n\n"
+            elif event_type == "done":
+                final_result = data
+                done_event = {"type": "done", **data}
+                yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+
+        # Persist after streaming completes.
+        _persist(db, req, final_result)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")

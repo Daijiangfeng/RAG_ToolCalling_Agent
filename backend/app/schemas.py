@@ -27,8 +27,8 @@ class ToolCall(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str = Field(..., min_length=1)
-    session_id: str = "default"
+    question: str = Field(..., min_length=1, max_length=10000)
+    session_id: str = Field(default="default", max_length=128)
 
 
 class ChatResponse(BaseModel):
@@ -45,6 +45,8 @@ class UploadResponse(BaseModel):
     pages: int
     chunks: int
     status: str
+    # 同名文档被覆盖替换（旧向量已删除并重新入库）时为 True，首次入库为 False。
+    replaced: bool = False
 
 
 class DocumentInfo(BaseModel):

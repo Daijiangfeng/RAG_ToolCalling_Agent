@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from app.config import settings
+from app.errors import ProviderError, describe_provider_error
 from app.logging import get_logger
 from rag.text import tokenize
 
@@ -114,6 +115,59 @@ class CrossEncoderReranker(Reranker):
         return [1.0 / (1.0 + math.exp(-float(s))) for s in raw]
 
 
+class ZhipuReranker(Reranker):
+    """智谱 rerank 模型（OpenAI 兼容端点，标准 HTTP Bearer 认证）。
+
+    通过 ``POST {openai_base_url}/rerank`` 调用智谱重排序服务，请求头为
+    ``Authorization: Bearer <auth_token>``（与 LLM / 向量 embedding 使用同一个令牌）。
+    模型编码默认为 ``rerank``；若 ``RERANKER_MODEL`` 配置的是 HF 路径则回退到该编码。
+    """
+
+    def __init__(self) -> None:
+        import httpx
+
+        self._url = settings.openai_base_url.rstrip("/") + "/rerank"
+        model = (settings.reranker_model or "").strip()
+        # 智谱 rerank 模型编码为 "rerank"；若配置的是 HF 路径（含 "/"）或为空，回退。
+        self._model = "rerank" if (not model or "/" in model) else model
+        self._token = settings.auth_token
+        self._client = httpx.Client(timeout=30.0)
+
+    def score(self, query: str, docs: list[dict[str, Any]]) -> list[float]:
+        if not docs:
+            return []
+        texts = [d["text"] for d in docs]
+        try:  # pragma: no cover - network
+            resp = self._client.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._token}"},
+                json={
+                    "model": self._model,
+                    "query": query,
+                    "documents": texts,
+                    "top_n": len(texts),
+                    "return_documents": False,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:  # pragma: no cover - network
+            # 与 embedding / LLM 客户端一致：已配置凭证的提供方运行时失败
+            # （鉴权/额度/模型/网络）必须抛出清晰的面向用户错误，而非静默降级。
+            logger.error("Zhipu rerank call failed: %s", exc)
+            raise ProviderError(
+                describe_provider_error("重排序模型", exc), detail=str(exc)
+            ) from exc
+        # 按响应中的原始 ``index`` 回填得分到与 ``docs`` 等长的列表（未命中填 0.0），
+        # 保证基类 ``rerank()`` 中 ``zip(docs, scores)`` 的顺序对齐。
+        scores = [0.0] * len(docs)
+        for item in data.get("results", []):
+            idx = item.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(scores):
+                scores[idx] = float(item.get("relevance_score", 0.0))
+        return scores
+
+
 _reranker_singleton: Reranker | None = None
 
 
@@ -121,13 +175,21 @@ def get_reranker() -> Reranker:
     global _reranker_singleton
     if _reranker_singleton is not None:
         return _reranker_singleton
-    if settings.reranker_backend.lower() in {"cross-encoder", "cross_encoder", "bge"}:
+    backend = settings.reranker_backend.lower()
+    if backend in {"cross-encoder", "cross_encoder", "bge"}:
         try:
             _reranker_singleton = CrossEncoderReranker()
             logger.info("Reranker: cross-encoder (%s)", settings.reranker_model)
             return _reranker_singleton
         except Exception as exc:  # pragma: no cover
             logger.warning("CrossEncoder unavailable (%s) -> lexical reranker", exc)
+    elif backend == "zhipu":
+        # 有令牌才在线调用智谱 rerank；缺凭证时回退到离线 lexical（合理的兜底降级）。
+        if settings.has_llm:
+            _reranker_singleton = ZhipuReranker()
+            logger.info("Reranker: zhipu (%s)", _reranker_singleton._model)
+            return _reranker_singleton
+        logger.info("Reranker backend 'zhipu' 但未配置令牌 -> lexical 回退")
     _reranker_singleton = LexicalReranker()
     logger.info("Reranker: lexical (offline)")
     return _reranker_singleton

@@ -32,7 +32,16 @@ def _index_segments(segments: list[dict], file_name: str) -> dict:
     )
     chunks = splitter.split_segments(segments, file_name=file_name)
     retriever = get_retriever()
+    # 同名文件先删后写，使入库对文件名幂等：重新上传同名文档时
+    # 替换旧向量，而非在向量库中累积重复 chunk。
+    removed = retriever.delete_file(file_name)
     n = retriever.index_chunks(chunks)
     pages = len({s.get("page_number", 1) for s in segments}) or len(segments)
     logger.info("Ingested %s: %d pages, %d chunks", file_name, pages, n)
-    return {"filename": file_name, "pages": pages, "chunks": n, "status": "processed"}
+    return {
+        "filename": file_name,
+        "pages": pages,
+        "chunks": n,
+        "status": "processed",
+        "replaced": removed > 0,
+    }

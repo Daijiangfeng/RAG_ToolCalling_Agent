@@ -40,6 +40,8 @@ export interface UploadResponse {
   pages: number;
   chunks: number;
   status: string;
+  // 同名文档被覆盖替换时为 true，首次入库为 false/缺省。
+  replaced?: boolean;
 }
 
 export interface DocumentInfo {
@@ -49,6 +51,12 @@ export interface DocumentInfo {
   chunks: number;
   status: string;
   created_time?: string | null;
+}
+
+export interface HealthResponse {
+  status: string;
+  llm_mode: string;
+  vector_count: number;
 }
 
 export interface EvaluationResponse {

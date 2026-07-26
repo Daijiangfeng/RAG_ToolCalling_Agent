@@ -137,3 +137,78 @@ def run_agent(question: str, session_id: str = "default") -> dict[str, Any]:
         "trace": final.get("trace", []),
         "intent": final.get("intent", ""),
     }
+
+
+def run_agent_streaming(question: str, session_id: str = "default"):
+    """Execute agent pre-generation steps, then yield answer tokens in real-time.
+
+    Yields:
+        Tuples of (event_type, data):
+        - ("token", str): a piece of the generated answer
+        - ("done", dict): final metadata (sources, confidence, tools, trace, intent)
+
+    This provides true streaming: routing/retrieval/reranking run first, then
+    the LLM generation streams tokens as they arrive rather than buffering the
+    entire answer before emitting fake token-by-token output.
+    """
+    from collections.abc import Iterator
+    from rag.generator import get_generator
+
+    agent = get_agent()
+    initial: AgentState = {
+        "question": question,
+        "original_question": question,
+        "session_id": session_id,
+        "trace": [],
+        "tool_results": [],
+        "sources": [],
+        "confidence": 0.0,
+    }
+    final: AgentState = agent.invoke(initial)
+
+    # For tool-based answers, the answer is already complete (no LLM streaming).
+    # For RAG-based answers with sufficient context, we can re-generate with streaming.
+    answer = final.get("answer", "")
+    need_tool = final.get("need_tool", False)
+    has_contexts = bool(final.get("reranked_docs"))
+
+    if not need_tool and has_contexts and answer:
+        # True streaming: re-generate using the LLM stream interface.
+        # The answer was already generated in the agent run, but we re-stream it
+        # for real-time output. In production, the generate_node could be skipped
+        # and streaming done here directly.
+        generator = get_generator()
+        streamed_chunks: list[str] = []
+        for token in generator.generate_stream(
+            final.get("question", question), final.get("reranked_docs", [])
+        ):
+            streamed_chunks.append(token)
+            yield ("token", token)
+        # Use the streamed version as the authoritative answer.
+        answer = "".join(streamed_chunks)
+    else:
+        # Non-streamable answer (tool results, rejections): emit as a single chunk.
+        yield ("token", answer)
+
+    memory.add_turn(session_id, question, answer)
+
+    tools = [
+        {"tool": r["tool"], "input": r["input"], "output": r["output"]}
+        for r in final.get("tool_results", [])
+    ]
+    sources = [
+        {
+            "text": s.get("text", ""),
+            "score": round(float(s.get("rerank_score", s.get("score", 0.0))), 4),
+            "metadata": s.get("metadata", {}),
+        }
+        for s in final.get("sources", [])
+    ]
+    yield ("done", {
+        "answer": answer,
+        "sources": sources,
+        "confidence": final.get("confidence", 0.0),
+        "tools": tools,
+        "trace": final.get("trace", []),
+        "intent": final.get("intent", ""),
+    })

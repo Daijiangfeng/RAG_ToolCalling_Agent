@@ -95,6 +95,18 @@ def seed_knowledge_base() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    # Initialize memory backend (Redis if available, else in-memory).
+    from agent.memory import init_memory_backend
+    init_memory_backend()
+
+    # Initialize OpenTelemetry tracing (no-op if OTEL_ENABLED!=true).
+    from app.telemetry import setup_telemetry
+    setup_telemetry()
+
+    # Initialize DI container with default factories.
+    from app.container import setup_container
+    setup_container()
+
     llm = get_llm()
     logger.info("LLM mode: %s | embedding: %s | reranker: %s",
                 llm.mode, settings.embedding_backend, settings.reranker_backend)

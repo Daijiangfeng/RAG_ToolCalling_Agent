@@ -41,7 +41,8 @@ async def upload(file: UploadFile = File(...), db: Session = Depends(get_db)) ->
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=f"Failed to process file: {exc}") from exc
 
-    # 同名文档按文件名去重/更新，避免重复上传产生多条 Document 行。
+    # 同名文档去重（覆盖替换）：向量已在 ingest 阶段按文件名删旧重写，
+    # 这里同步按文件名更新/新增 Document 行，避免产生多条同名记录。
     existing = db.query(Document).filter(Document.file_name == result["filename"]).first()
     if existing is not None:
         existing.pages = result["pages"]

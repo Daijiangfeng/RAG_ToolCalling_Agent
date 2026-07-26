@@ -24,6 +24,25 @@ interface ChatState {
 }
 
 const TRACE_KEY = "lastTrace";
+const SESSION_KEY = "sessionId";
+
+/** 读取可配置会话 ID（设置页可改），缺省 "default"。 */
+export function getSessionId(): string {
+  try {
+    return localStorage.getItem(SESSION_KEY)?.trim() || "default";
+  } catch {
+    return "default";
+  }
+}
+
+/** 持久化会话 ID；空值回退到 "default"。 */
+export function setSessionId(id: string): void {
+  try {
+    localStorage.setItem(SESSION_KEY, id.trim() || "default");
+  } catch {
+    /* 忽略存储配额等异常。 */
+  }
+}
 
 /** 从 sessionStorage 恢复上次轨迹，避免刷新后 Trace 页空白。 */
 function loadTrace(): TraceStep[] {
@@ -101,7 +120,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set({ loading: false });
         },
       },
-      "default",
+      getSessionId(),
       controller.signal
     );
 

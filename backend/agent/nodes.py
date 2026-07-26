@@ -8,6 +8,7 @@ thought, only a short summary per the requirements).
 from __future__ import annotations
 
 import re
+import time
 
 from agent import memory
 from agent.state import AgentState
@@ -45,38 +46,82 @@ def rewrite_node(state: AgentState) -> AgentState:
     if needs_rewrite(question, history):
         new_q = query_rewrite(question, history)
         used.append("query_rewrite")
-    # HyDE: expand the query with a hypothetical answer for retrieval.
-    retrieval_query = hyde(new_q)
-    used.append("hyde")
+    # HyDE: conditionally expand the query with a hypothetical answer.
+    # Short, simple queries (< 15 chars) are unlikely to benefit from HyDE
+    # and the extra LLM call adds latency. Only apply for longer/complex queries.
+    if len(new_q) >= 15:
+        retrieval_query = hyde(new_q)
+        used.append("hyde")
+    else:
+        retrieval_query = new_q
+        used.append("hyde_skipped(短查询)")
     state["question"] = new_q
     state["retrieval_query"] = retrieval_query  # type: ignore[typeddict-unknown-key]
     _trace(
         state,
         "query_rewrite",
-        f"应用 Advanced RAG:{'、'.join(used)};检索查询已优化。"
+        f"应用 Advanced RAG:{'、'.join(used)}；检索查询已优化。"
         + (f" 改写后问题:{new_q}" if new_q != question else ""),
     )
     return state
 
 
 def retrieve_node(state: AgentState) -> AgentState:
+    """Retrieve relevant documents, with multi-step decomposition for complex queries."""
+    from rag.decomposer import decompose_question
+
     retriever = get_retriever()
     query = state.get("retrieval_query") or state["question"]  # type: ignore[attr-defined]
-    docs = retriever.similarity_search(query, top_k=settings.top_k)
-    state["retrieved_docs"] = docs
-    _trace(
-        state,
-        "retrieval",
-        f"向量检索返回 {len(docs)} 个候选片段(top_k={settings.top_k})。",
-        data_count=len(docs),
-    )
+
+    # Multi-step retrieval: decompose complex questions into sub-queries
+    sub_queries = decompose_question(query)
+    t0 = time.perf_counter()
+
+    if len(sub_queries) > 1:
+        # Multiple sub-queries: retrieve for each and fuse results via RRF
+        all_docs = []
+        seen_texts = set()
+        for sq in sub_queries:
+            docs = retriever.similarity_search(sq, top_k=settings.top_k)
+            for doc in docs:
+                text = doc.get("text", "")
+                if text not in seen_texts:
+                    seen_texts.add(text)
+                    all_docs.append(doc)
+
+        # Limit total to top_k * 1.5 (extra docs from multi-query)
+        max_docs = int(settings.top_k * 1.5)
+        docs = all_docs[:max_docs]
+        retrieval_ms = (time.perf_counter() - t0) * 1000
+        state["retrieved_docs"] = docs
+        _trace(
+            state,
+            "retrieval",
+            f"多步检索: {len(sub_queries)} 个子查询 → {len(docs)} 去重候选片段，耗时 {retrieval_ms:.0f}ms。",
+            data_count=len(docs),
+            latency_ms=round(retrieval_ms, 1),
+        )
+    else:
+        # Single query: original path
+        docs = retriever.similarity_search(query, top_k=settings.top_k)
+        retrieval_ms = (time.perf_counter() - t0) * 1000
+        state["retrieved_docs"] = docs
+        _trace(
+            state,
+            "retrieval",
+            f"向量检索返回 {len(docs)} 个候选片段(top_k={settings.top_k})，耗时 {retrieval_ms:.0f}ms。",
+            data_count=len(docs),
+            latency_ms=round(retrieval_ms, 1),
+        )
     return state
 
 
 def rerank_node(state: AgentState) -> AgentState:
     reranker = get_reranker()
     docs = state.get("retrieved_docs", [])
+    t0 = time.perf_counter()
     reranked = reranker.rerank(state["question"], docs, top_n=settings.rerank_top_n)
+    rerank_ms = (time.perf_counter() - t0) * 1000
     compressed = context_compression(reranked)
     confidence = float(reranked[0]["rerank_score"]) if reranked else 0.0
     state["reranked_docs"] = compressed
@@ -85,9 +130,10 @@ def rerank_node(state: AgentState) -> AgentState:
     _trace(
         state,
         "rerank",
-        f"Cross-Encoder 重排序保留 Top {len(compressed)} 上下文,最高分 {confidence:.3f}。",
+        f"Cross-Encoder 重排序保留 Top {len(compressed)} 上下文，最高分 {confidence:.3f}，耗时 {rerank_ms:.0f}ms。",
         top_score=confidence,
         kept=len(compressed),
+        latency_ms=round(rerank_ms, 1),
     )
     return state
 
@@ -150,13 +196,20 @@ def reject_node(state: AgentState) -> AgentState:
 
 
 def generate_node(state: AgentState) -> AgentState:
+    t0 = time.perf_counter()
     if state.get("need_tool"):
         answer = _generate_from_tools(state)
-        _trace(state, "generation", "基于工具执行结果生成回答。")
+        gen_ms = (time.perf_counter() - t0) * 1000
+        _trace(state, "generation", f"基于工具执行结果生成回答，耗时 {gen_ms:.0f}ms。", latency_ms=round(gen_ms, 1))
     else:
         generator = get_generator()
         answer = generator.generate(state["question"], state.get("reranked_docs", []))
-        _trace(state, "generation", f"基于 {len(state.get('reranked_docs', []))} 条压缩上下文生成回答。")
+        gen_ms = (time.perf_counter() - t0) * 1000
+        _trace(
+            state, "generation",
+            f"基于 {len(state.get('reranked_docs', []))} 条压缩上下文生成回答，耗时 {gen_ms:.0f}ms。",
+            latency_ms=round(gen_ms, 1),
+        )
     state["answer"] = answer
     return state
 

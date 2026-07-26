@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Statistic, Button, Table, App, Typography, Progress, Space, Empty } from "antd";
+import { Button, Table, App, Typography, Progress, Space, Empty } from "antd";
 import { PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import { getEvaluation, runEvaluation, toApiError } from "../api/client";
 import type { EvaluationResponse } from "../types";
-import { STATUS } from "../theme/tokens";
 import { formatDateTime } from "../utils/format";
 import PageContainer from "../components/PageContainer";
 import SectionCard from "../components/SectionCard";
@@ -14,9 +13,34 @@ function pct(v: number): number {
   return Math.round((v ?? 0) * 100);
 }
 
-// 统计卡在小屏下堆叠、大屏均分。
-const STAT_COL = { xs: 24, sm: 12, md: 6 };
-const STAT_COL_3 = { xs: 24, sm: 12, md: 8 };
+/** hairline 指标卡：小型大写标签 + mono 数值。danger 时数值用语义色。 */
+function MetricCard({
+  label,
+  value,
+  danger,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="hairline" style={{ padding: 16 }}>
+      <div className="caption-upper" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </div>
+      <div
+        className="mono"
+        style={{
+          fontSize: 24,
+          marginTop: 6,
+          color: danger ? "var(--danger)" : "var(--text-primary)",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
 export default function EvaluationPage() {
   const { message } = App.useApp();
@@ -65,22 +89,43 @@ export default function EvaluationPage() {
 
   const columns = [
     { title: "问题类型", dataIndex: "type" },
-    { title: "数量", dataIndex: "count", width: 90 },
-    { title: "通过数", dataIndex: "passed", width: 90 },
+    { title: "数量", dataIndex: "count", width: 90, render: (v: number) => <span className="mono">{v}</span> },
+    { title: "通过数", dataIndex: "passed", width: 90, render: (v: number) => <span className="mono">{v}</span> },
     {
       title: "忠实度",
       dataIndex: "faithfulness",
-      width: 160,
-      render: (v: number) => <Progress percent={pct(v)} size="small" />,
+      width: 180,
+      render: (v: number) => (
+        <Progress percent={pct(v)} size="small" strokeColor="var(--accent)" />
+      ),
     },
   ];
 
+  const metricGrid: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
+  };
+
   return (
-    <PageContainer maxWidth={1000}>
-      <SectionCard
-        title="RAG 自动评估看板"
-        style={{ marginBottom: 16 }}
-        extra={
+    <div style={{ overflowY: "auto" }}>
+      <PageContainer maxWidth={1000}>
+        <div
+          style={{
+            padding: "40px 0 24px",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
+          }}
+        >
+          <div>
+            <h1 className="display-lg">评估</h1>
+            <p style={{ color: "var(--text-secondary)", margin: "10px 0 0", fontSize: 14 }}>
+              RAG 检索与生成质量的自动评估看板
+            </p>
+          </div>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
               刷新
@@ -89,77 +134,34 @@ export default function EvaluationPage() {
               运行评估
             </Button>
           </Space>
-        }
-      >
+        </div>
+
         {data ? (
           <>
-            <Row gutter={[16, 16]}>
-              <Col {...STAT_COL}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="检索精确率 Precision@K"
-                    value={pct(data.retrieval.precision_at_k)}
-                    suffix="%"
-                  />
-                </SectionCard>
-              </Col>
-              <Col {...STAT_COL}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="检索召回率 Recall@K"
-                    value={pct(data.retrieval.recall_at_k)}
-                    suffix="%"
-                  />
-                </SectionCard>
-              </Col>
-              <Col {...STAT_COL}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="忠实度 Faithfulness"
-                    value={pct(data.generation.faithfulness)}
-                    suffix="%"
-                  />
-                </SectionCard>
-              </Col>
-              <Col {...STAT_COL}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="幻觉率"
-                    value={pct(data.safety.hallucination_rate)}
-                    suffix="%"
-                    valueStyle={{ color: STATUS.danger }}
-                  />
-                </SectionCard>
-              </Col>
-            </Row>
+            <div style={metricGrid}>
+              <MetricCard label="Precision@K" value={`${pct(data.retrieval.precision_at_k)}%`} />
+              <MetricCard label="Recall@K" value={`${pct(data.retrieval.recall_at_k)}%`} />
+              <MetricCard label="Faithfulness" value={`${pct(data.generation.faithfulness)}%`} />
+              <MetricCard
+                label="幻觉率"
+                value={`${pct(data.safety.hallucination_rate)}%`}
+                danger
+              />
+            </div>
 
-            <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-              <Col {...STAT_COL_3}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="答案相关性 Answer Relevance"
-                    value={pct(data.generation.answer_relevance)}
-                    suffix="%"
-                  />
-                </SectionCard>
-              </Col>
-              <Col {...STAT_COL_3}>
-                <SectionCard size="small">
-                  <Statistic
-                    title="上下文相关性 Context Relevance"
-                    value={pct(data.generation.context_relevance)}
-                    suffix="%"
-                  />
-                </SectionCard>
-              </Col>
-              <Col {...STAT_COL_3}>
-                <SectionCard size="small">
-                  <Statistic title="测试样本数" value={data.total} />
-                </SectionCard>
-              </Col>
-            </Row>
+            <div style={{ ...metricGrid, marginTop: 12 }}>
+              <MetricCard
+                label="Answer Relevance"
+                value={`${pct(data.generation.answer_relevance)}%`}
+              />
+              <MetricCard
+                label="Context Relevance"
+                value={`${pct(data.generation.context_relevance)}%`}
+              />
+              <MetricCard label="测试样本数" value={String(data.total)} />
+            </div>
 
-            <SectionCard size="small" title="分类别指标" style={{ marginTop: 16 }}>
+            <SectionCard title="分类别指标" style={{ marginTop: 16 }}>
               <Table
                 columns={columns}
                 dataSource={perTypeRows}
@@ -170,15 +172,21 @@ export default function EvaluationPage() {
             </SectionCard>
 
             {data.generated_at && (
-              <Text type="secondary" style={{ display: "block", marginTop: 12 }}>
+              <Text
+                type="secondary"
+                className="mono"
+                style={{ display: "block", marginTop: 12, fontSize: 12 }}
+              >
                 生成时间:{formatDateTime(data.generated_at)}
               </Text>
             )}
           </>
         ) : (
-          <Empty description="暂无评估数据,请点击“运行评估”生成" />
+          <SectionCard>
+            <Empty description="暂无评估数据,请点击“运行评估”生成" />
+          </SectionCard>
         )}
-      </SectionCard>
-    </PageContainer>
+      </PageContainer>
+    </div>
   );
 }

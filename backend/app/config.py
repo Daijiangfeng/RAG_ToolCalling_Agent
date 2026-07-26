@@ -58,7 +58,9 @@ class Settings(BaseSettings):
     embedding_dim: int = 2048
 
     # --- Reranker ---------------------------------------------------------
-    # one of: "cross-encoder", "lexical" (lexical == offline fallback)
+    # one of: "cross-encoder", "zhipu", "lexical"
+    #   zhipu   == 智谱在线 rerank（标准 HTTP Bearer，模型编码 "rerank"）
+    #   lexical == 离线兜底回退
     reranker_backend: str = "lexical"
     reranker_model: str = "BAAI/bge-reranker-large"
 
@@ -80,6 +82,9 @@ class Settings(BaseSettings):
 
     # --- Database ---------------------------------------------------------
     database_url: str = f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
+
+    # --- Redis (optional, for distributed session memory) -----------------
+    redis_url: str = ""
 
     # --- Misc -------------------------------------------------------------
     upload_dir: str = str(DATA_DIR / "uploads")

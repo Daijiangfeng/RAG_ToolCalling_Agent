@@ -30,6 +30,9 @@ class VectorStore(ABC):
     def count(self) -> int: ...
 
     @abstractmethod
+    def delete_by_file(self, file_name: str) -> int: ...
+
+    @abstractmethod
     def reset(self) -> None: ...
 
 
@@ -83,6 +86,21 @@ class InMemoryStore(VectorStore):
     def count(self) -> int:
         return len(self._ids)
 
+    def delete_by_file(self, file_name: str) -> int:
+        # 保留 file_name 不匹配的条目，重建四个平行列表；返回删除数量。
+        keep = [
+            i
+            for i, meta in enumerate(self._metas)
+            if (meta or {}).get("file_name") != file_name
+        ]
+        removed = len(self._ids) - len(keep)
+        if removed:
+            self._ids = [self._ids[i] for i in keep]
+            self._texts = [self._texts[i] for i in keep]
+            self._metas = [self._metas[i] for i in keep]
+            self._vectors = [self._vectors[i] for i in keep]
+        return removed
+
     def reset(self) -> None:
         self._ids.clear()
         self._texts.clear()
@@ -132,6 +150,11 @@ class ChromaStore(VectorStore):
 
     def count(self):  # pragma: no cover - optional dep
         return self._collection.count()
+
+    def delete_by_file(self, file_name):  # pragma: no cover - optional dep
+        before = self.count()
+        self._collection.delete(where={"file_name": file_name})
+        return before - self.count()
 
     def reset(self):  # pragma: no cover - optional dep
         self._client.delete_collection(settings.collection_name)

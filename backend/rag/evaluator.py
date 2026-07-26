@@ -51,6 +51,80 @@ def _overlap_ratio(a: str, b: str) -> float:
     return len(ta & tb) / len(ta)
 
 
+# ---------------------------------------------------------------------------
+# LLM-as-judge scoring (Section P2 #7)
+# ---------------------------------------------------------------------------
+
+_LLM_JUDGE_SYSTEM = (
+    "You are an evaluation judge. Score the following on a scale of 0.0 to 1.0. "
+    "Output ONLY a single float number, nothing else."
+)
+
+
+def _llm_judge_score(prompt: str) -> float | None:
+    """Use the LLM to score a metric. Returns None if LLM is unavailable."""
+    try:
+        from app.llm import get_llm
+        llm = get_llm()
+        if llm.mode == "mock":
+            return None  # Don't use mock for judging
+        response = llm.complete([
+            {"role": "system", "content": _LLM_JUDGE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ])
+        # Parse the float from the response
+        import re
+        match = re.search(r"(\d+\.?\d*)", response.strip())
+        if match:
+            return min(1.0, max(0.0, float(match.group(1))))
+    except Exception:
+        pass
+    return None
+
+
+def score_faithfulness(answer: str, context: str) -> float:
+    """Score faithfulness using LLM-as-judge, falling back to lexical overlap."""
+    prompt = (
+        f"Context: {context[:2000]}\n\n"
+        f"Answer: {answer[:1000]}\n\n"
+        "How faithfully does the answer reflect ONLY information from the context? "
+        "Score 1.0 if fully faithful, 0.0 if completely fabricated."
+    )
+    score = _llm_judge_score(prompt)
+    if score is not None:
+        return score
+    # Fallback: lexical overlap heuristic
+    return _overlap_ratio(answer, context)
+
+
+def score_answer_relevance(answer: str, question: str) -> float:
+    """Score answer relevance using LLM-as-judge, falling back to lexical overlap."""
+    prompt = (
+        f"Question: {question}\n\n"
+        f"Answer: {answer[:1000]}\n\n"
+        "How relevant and complete is this answer to the question? "
+        "Score 1.0 if perfectly relevant, 0.0 if completely off-topic."
+    )
+    score = _llm_judge_score(prompt)
+    if score is not None:
+        return score
+    return _overlap_ratio(answer, question)
+
+
+def score_context_relevance(context: str, question: str) -> float:
+    """Score context relevance using LLM-as-judge, falling back to lexical overlap."""
+    prompt = (
+        f"Question: {question}\n\n"
+        f"Retrieved context: {context[:2000]}\n\n"
+        "How relevant is this context to answering the question? "
+        "Score 1.0 if highly relevant, 0.0 if completely irrelevant."
+    )
+    score = _llm_judge_score(prompt)
+    if score is not None:
+        return score
+    return _overlap_ratio(context, question)
+
+
 def load_testset(path: Path | None = None) -> list[dict[str, Any]]:
     path = path or TESTSET_PATH
     if not path.exists():
@@ -91,12 +165,12 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
 
     precision, recall = _precision_recall([], expected_kw, contexts)
 
-    # Faithfulness: answer tokens supported by the retrieved context.
+    # Generation quality scoring via LLM-as-judge (falls back to lexical heuristic).
     ctx_join = " ".join(c.get("text", "") for c in contexts)
-    faithfulness = _overlap_ratio(answer, ctx_join) if contexts else (1.0 if is_rejection else 0.0)
-    answer_relevance = _overlap_ratio(answer, case["question"]) if answer else 0.0
+    faithfulness = score_faithfulness(answer, ctx_join) if contexts else (1.0 if is_rejection else 0.0)
+    answer_relevance = score_answer_relevance(answer, case["question"]) if answer else 0.0
     context_relevance = (
-        max((_overlap_ratio(c.get("text", ""), case["question"]) for c in contexts), default=0.0)
+        max((score_context_relevance(c.get("text", ""), case["question"]) for c in contexts), default=0.0)
     )
 
     # Behaviour-based correctness for hallucination / rejection cases.

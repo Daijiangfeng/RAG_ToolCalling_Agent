@@ -4,6 +4,7 @@ import type {
   ChatResponse,
   DocumentInfo,
   EvaluationResponse,
+  HealthResponse,
   TraceStep,
   Source,
   ToolCall,
@@ -51,6 +52,11 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
 
 export async function getDocuments(): Promise<DocumentInfo[]> {
   const { data } = await api.get<DocumentInfo[]>("/documents");
+  return data;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  const { data } = await api.get<HealthResponse>("/health");
   return data;
 }
 

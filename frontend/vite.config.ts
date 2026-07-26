@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The backend runs on :8000. All /api calls are proxied in dev.
+// The backend runs on :8000 (override with VITE_API_TARGET). All /api calls are proxied in dev.
+const apiTarget = process.env.VITE_API_TARGET || "http://localhost:8000";
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -21,7 +23,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: apiTarget,
         changeOrigin: true,
       },
     },
