@@ -346,6 +346,58 @@ curl -X POST http://localhost:8000/api/evaluation/run
 
 ---
 
+## 架构改进（v2）
+
+### 检索增强
+
+- **BM25 + RRF 混合检索**：`rag/retriever.py` 实现内存 BM25 索引 + Reciprocal Rank Fusion 融合密集/稀疏检索结果，提升术语/专名查询的召回率
+- **多步检索 / 子问题分解**：`rag/decomposer.py` 将复杂多方面问题自动拆解为 2–4 个子查询独立检索后融合去重
+- **父子块索引**：`rag/splitter.py` 实现多粒度分块（句级 embedding + 段级上下文），检索时返回句级匹配但展示段级上下文
+- **HyDE 条件激活**：短查询（<15 字符）跳过 HyDE 假设答案生成，减少不必要的 LLM 调用延迟
+
+### 生成与流式
+
+- **真正流式生成**：`run_agent_streaming()` 先完成检索/重排随后直接 stream LLM 输出，替代旧的“执行完再逐字”假流式，显著降低首字延迟
+- **生成节点延迟指标**：每个节点耗时 `latency_ms` 写入 trace，便于性能分析
+
+### 会话记忆
+
+- **Redis 会话记忆**：`RedisConversationMemory` 实现分布式持久化，Key 设计 `memory:{session_id}` → Redis List（RPUSH + LTRIM）
+- **自动检测切换**：配置 `REDIS_URL` 且 Redis 可达则自动切换，否则保持 InMemory
+- **抽象接口**：`ConversationMemory` ABC + `set_backend()` 支持运行时切换后端
+
+### 评估
+
+- **LLM-as-judge 评估接口**：`score_faithfulness` / `score_answer_relevance` / `score_context_relevance` 使用 LLM 评分，LLM 不可用时自动回退词法启发式
+
+### 可观测性与工程基础
+
+- **OpenTelemetry 分布式追踪**：设置 `OTEL_ENABLED=true` 启用，各 Agent 节点自动创建 span
+- **Observer 事件发射器**：`agent/events.py` 提供 `EventBus`（subscribe/emit）+ 8 种事件类型（RetrievalStarted/Completed、GenerationStarted/Completed、ToolCalled 等），支持多订阅者
+- **依赖注入容器**：`app/container.py` 统一管理 embedder/store/reranker/llm 单例，测试中通过 `container.reset()` + 重新注册 mock 实现
+- **输入验证**：question 最大 10000 字符，session_id 最大 128 字符
+- **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job
+
+### 新增配置
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `REDIS_URL` | 空 | Redis 连接地址，空=不启用 Redis 记忆 |
+| `OTEL_ENABLED` | `false` | 启用 OpenTelemetry 追踪 |
+| `OTEL_SERVICE_NAME` | `rag-agent` | OTel 服务名 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP 收集器地址 |
+
+### 新增依赖
+
+```
+redis[hiredis]>=5.0
+opentelemetry-sdk>=1.20
+opentelemetry-exporter-otlp>=1.20
+opentelemetry-instrumentation-fastapi>=0.41b0
+```
+
+---
+
 ## 16. 测试
 
 ```powershell
