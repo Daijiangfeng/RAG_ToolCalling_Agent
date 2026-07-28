@@ -1,6 +1,6 @@
 """Web search tool.
 
-Supports Tavily / SerpAPI when a key is configured; otherwise returns
+Supports Tavily when a key is configured; otherwise returns
 deterministic mock results so the "real-time info" demo works offline.
 """
 

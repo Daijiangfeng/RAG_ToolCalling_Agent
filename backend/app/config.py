@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     # --- Tools ------------------------------------------------------------
     web_search_api_key: str = ""
-    web_search_provider: str = "mock"  # "tavily" | "serpapi" | "mock"
+    web_search_provider: str = "mock"  # "tavily" | "mock"（仅实现 Tavily，无 key 回退 mock）
 
     # --- Database ---------------------------------------------------------
     database_url: str = f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
