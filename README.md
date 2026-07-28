@@ -89,12 +89,12 @@
 | LLM | OpenAI 兼容 SDK（**智谱 GLM** / OpenAI / Azure / DeepSeek / Qwen …）+ 离线 mock |
 | Embedding | 智谱 / OpenAI / BGE (sentence-transformers) / Hash（离线兜底） |
 | 向量库 | Chroma（持久化）/ InMemory（离线兜底），接口可扩展 Milvus/Qdrant |
-| Reranker | Cross-Encoder (BAAI/bge-reranker-large) / Lexical（离线兜底） |
+| Reranker | Cross-Encoder (BAAI/bge-reranker-large) / 智谱在线 rerank / Lexical（离线兜底） |
 | 文档解析 | PyMuPDF (PDF)、Markdown 解析 |
 | 数据库 | SQLite（零配置） |
 | 前端 | React 18, TypeScript, Vite, Ant Design 5, Zustand, Axios, react-markdown |
 | 部署 | Docker + docker-compose（backend + frontend/nginx） |
-| 测试 | pytest（35 用例，离线全绿） |
+| 测试 | pytest（47 用例，离线全绿） |
 
 ---
 
@@ -168,7 +168,7 @@ Agent 使用 **StateGraph**（`agent/graph.py`），状态定义见 `agent/state
 | 工具 | 说明 | 触发示例 |
 | --- | --- | --- |
 | `calculator` | 安全 AST 表达式求值（禁 `eval`，仅算术） | `12345 * 678`、`(3+4)^2` |
-| `web_search` | 网络搜索封装（Tavily/SerpAPI），无 key 返回确定性 mock | "最新的 AI 新闻" |
+| `web_search` | 网络搜索封装（Tavily），无 key 返回确定性 mock | "最新的 AI 新闻" |
 | `file_query` | 按文件名/关键词查询已入库 chunk | "在 xxx.pdf 里查 …" |
 | `datetime_tool` | 当前时间 / 日期计算 | "今天几号"、"距离 X 还有几天" |
 
@@ -267,13 +267,26 @@ ANTHROPIC_AUTH_TOKEN=<id.secret> MODEL_NAME=glm-4.5-air EMBEDDING_BACKEND=openai
 | `MAX_TOKENS` | `1024` | Anthropic messages API 要求的最大生成 token 数 |
 | `OPENAI_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 智谱 OpenAI 兼容端点（仅向量 embedding） |
 | `EMBEDDING_BACKEND` | `hash` | `openai`（如智谱 `embedding-3`）/ `bge` / `hash` |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | `EMBEDDING_BACKEND=bge` 时的本地模型名 |
 | `OPENAI_EMBEDDING_MODEL` | `embedding-3` | `EMBEDDING_BACKEND=openai` 时的向量模型名 |
-| `RERANKER_BACKEND` | `lexical` | `cross-encoder` / `lexical` |
+| `EMBEDDING_DIM` | `2048` | 向量维度 |
+| `RERANKER_BACKEND` | `lexical` | `cross-encoder` / `zhipu`（智谱在线 rerank）/ `lexical` |
+| `RERANKER_MODEL` | `BAAI/bge-reranker-large` | Cross-Encoder 模型名；`zhipu` 时模型编码为 `rerank` |
 | `VECTOR_BACKEND` | `chroma` | `chroma` / `memory` |
+| `COLLECTION_NAME` | `knowledge_base` | Chroma 集合名 |
+| `CHROMA_DIR` | `backend/data/chroma` | Chroma 持久化目录 |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `150` | 切分参数 |
 | `TOP_K` / `RERANK_TOP_N` | `20` / `5` | 检索/重排数量 |
 | `CONFIDENCE_THRESHOLD` | `0.30` | 拒答置信度阈值 |
-| `WEB_SEARCH_PROVIDER` | `mock` | `tavily` / `serpapi` / `mock` |
+| `WEB_SEARCH_PROVIDER` | `mock` | `tavily` / `mock`（仅实现 Tavily，无 key 回退 mock） |
+| `WEB_SEARCH_API_KEY` | 空 | 搜索服务密钥（Tavily） |
+| `DATABASE_URL` | `sqlite:///backend/data/app.db` | SQLAlchemy 连接串，可换 PostgreSQL |
+| `REDIS_URL` | 空 | Redis 连接地址，空=进程内会话记忆；配置且可达时自动切换 Redis 记忆 |
+| `UPLOAD_DIR` | `backend/data/uploads` | 上传文件保存目录 |
+| `CORS_ORIGINS` | `*` | 允许的前端源（逗号分隔）；含 `*` 时自动关闭 credentials |
+| `OTEL_ENABLED` | `false` | 启用 OpenTelemetry 追踪 |
+| `OTEL_SERVICE_NAME` | `rag-agent` | OTel 服务名 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP 收集器地址 |
 
 - 启用本地 BGE 模型需在 `requirements.txt` 取消注释 `sentence-transformers` 与 `torch` 并安装。
 - **切换 embedding 后端后请重建知识库**：库内向量与查询向量必须来自同一 embedder，否则检索会失效（启动时会尝试自动重建，也可删除 `backend/data/chroma` 后重新入库）。
@@ -378,14 +391,7 @@ curl -X POST http://localhost:8000/api/evaluation/run
 - **输入验证**：question 最大 10000 字符，session_id 最大 128 字符
 - **CI 安全扫描**：GitHub Actions 新增 `pip-audit` job
 
-### 新增配置
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `REDIS_URL` | 空 | Redis 连接地址，空=不启用 Redis 记忆 |
-| `OTEL_ENABLED` | `false` | 启用 OpenTelemetry 追踪 |
-| `OTEL_SERVICE_NAME` | `rag-agent` | OTel 服务名 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP 收集器地址 |
+> Redis / OpenTelemetry 相关环境变量（`REDIS_URL`、`OTEL_*`）已并入上方「11. 环境变量配置」主表。
 
 ### 新增依赖
 
@@ -405,7 +411,7 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-覆盖:loader / splitter / embedding / retriever / reranker / router / tools / agent / api（TestClient）。**全部在离线兜底模式下可稳定跑通（35 passing）。**
+覆盖:loader / splitter / embedding / retriever / reranker / router / tools / dedup / agent / api（TestClient）。**全部在离线兜底模式下可稳定跑通（47 passing）。**
 
 ---
 
@@ -421,7 +427,7 @@ RAG_ToolCalling_Agent/
 │   ├── tools/       # calculator, web_search, file_query, datetime, registry
 │   ├── api/         # upload, chat, evaluation, documents
 │   ├── data/        # seed_docs, eval/testset.json, chroma, uploads
-│   ├── tests/       # pytest (35)
+│   ├── tests/       # pytest (47)
 │   ├── main.py      # FastAPI entrypoint
 │   ├── requirements.txt / .env.example / Dockerfile
 │   └── evaluation_report.md
