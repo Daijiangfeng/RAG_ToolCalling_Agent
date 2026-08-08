@@ -13,6 +13,7 @@ A markdown report is written to ``backend/evaluation_report.md``.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,14 @@ def _llm_judge_score(prompt: str) -> float | None:
     return None
 
 
+def _score_with_fallback(prompt: str, fallback_fn: Callable[[], float]) -> float:
+    """Score via LLM-as-judge, falling back to a heuristic if LLM is unavailable."""
+    score = _llm_judge_score(prompt)
+    if score is not None:
+        return score
+    return fallback_fn()
+
+
 def score_faithfulness(answer: str, context: str) -> float:
     """Score faithfulness using LLM-as-judge, falling back to lexical overlap."""
     prompt = (
@@ -90,11 +99,7 @@ def score_faithfulness(answer: str, context: str) -> float:
         "How faithfully does the answer reflect ONLY information from the context? "
         "Score 1.0 if fully faithful, 0.0 if completely fabricated."
     )
-    score = _llm_judge_score(prompt)
-    if score is not None:
-        return score
-    # Fallback: lexical overlap heuristic
-    return _overlap_ratio(answer, context)
+    return _score_with_fallback(prompt, lambda: _overlap_ratio(answer, context))
 
 
 def score_answer_relevance(answer: str, question: str) -> float:
@@ -105,10 +110,7 @@ def score_answer_relevance(answer: str, question: str) -> float:
         "How relevant and complete is this answer to the question? "
         "Score 1.0 if perfectly relevant, 0.0 if completely off-topic."
     )
-    score = _llm_judge_score(prompt)
-    if score is not None:
-        return score
-    return _overlap_ratio(answer, question)
+    return _score_with_fallback(prompt, lambda: _overlap_ratio(answer, question))
 
 
 def score_context_relevance(context: str, question: str) -> float:
@@ -119,10 +121,7 @@ def score_context_relevance(context: str, question: str) -> float:
         "How relevant is this context to answering the question? "
         "Score 1.0 if highly relevant, 0.0 if completely irrelevant."
     )
-    score = _llm_judge_score(prompt)
-    if score is not None:
-        return score
-    return _overlap_ratio(context, question)
+    return _score_with_fallback(prompt, lambda: _overlap_ratio(context, question))
 
 
 def load_testset(path: Path | None = None) -> list[dict[str, Any]]:

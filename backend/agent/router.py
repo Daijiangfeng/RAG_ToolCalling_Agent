@@ -13,6 +13,7 @@ import re
 from agent.state import AgentState
 from app.llm import get_llm
 from app.logging import get_logger
+from tools.calculator import normalize_math_expr
 
 logger = get_logger(__name__)
 
@@ -29,16 +30,12 @@ ROUTER_SYSTEM = (
 )
 
 
-def _normalize_math(q: str) -> str:
-    return q.replace("×", "*").replace("÷", "/").replace("x", "*").replace("X", "*").replace("^", "**")
-
-
 def classify(question: str) -> dict:
     """Return the routing decision for a question."""
     q = question.strip()
 
     # 1) Pure arithmetic expression -> calculator.
-    stripped = _normalize_math(q.rstrip("=?？"))
+    stripped = normalize_math_expr(q.rstrip("=?？"))
     if _MATH_RE.match(q) and re.search(r"\d", q) and re.search(r"[\+\-\*/%×xX÷^]", q):
         return {"intent": "tool", "need_rag": False, "need_tool": True, "tool_name": "calculator",
                 "summary": "问题是纯算术表达式,选择 calculator 工具计算。"}
@@ -83,7 +80,7 @@ def classify(question: str) -> dict:
 
 
 def _extract_expression(q: str) -> str:
-    m = re.search(r"[\d\.\s\+\-\*/%×xX÷\(\)\^]{3,}", _normalize_math(q))
+    m = re.search(r"[\d\.\s\+\-\*/%×xX÷\(\)\^]{3,}", normalize_math_expr(q))
     return m.group(0).strip() if m else ""
 
 

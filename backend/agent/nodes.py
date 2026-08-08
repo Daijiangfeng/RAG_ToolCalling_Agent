@@ -20,6 +20,7 @@ from rag.generator import context_compression, get_generator
 from rag.reranker import get_reranker
 from rag.retriever import get_retriever
 from tools import registry
+from tools.calculator import normalize_math_expr
 
 logger = get_logger(__name__)
 
@@ -176,7 +177,7 @@ def _build_tool_args(tool_name: str, question: str) -> dict:
 
 
 def _extract_math(q: str) -> str:
-    norm = q.replace("×", "*").replace("÷", "/").replace("x", "*").replace("X", "*").replace("^", "**")
+    norm = normalize_math_expr(q)
     m = re.search(r"[\d\.\s\+\-\*/%\(\)]{3,}", norm)
     return m.group(0).strip().rstrip("=") if m else ""
 

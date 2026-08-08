@@ -1,12 +1,8 @@
-"""Recursive character text splitter with parent-child chunk support.
+"""Recursive character text splitter.
 
 Splits loader *segments* into overlapping chunks while preserving the section
 heading and page number.  ``chunk_size`` and ``chunk_overlap`` are configurable
 (defaults 800 / 150).
-
-Section 1.2 enhancement: multi-granularity parent-child indexing. Child chunks
-are fine-grained (sentence-level) for precise retrieval, while parent chunks
-(paragraph-level) provide fuller context for the generator.
 """
 
 from __future__ import annotations
@@ -29,19 +25,6 @@ class Chunk:
     heading: str = ""
     page_number: int = 1
     metadata: dict = field(default_factory=dict)
-
-
-@dataclass
-class ParentChildChunk:
-    """A fine-grained child chunk linked to its broader parent context.
-
-    When used with the retriever, the *child* text is embedded for precise
-    matching, but the *parent* text is returned to the generator for richer
-    context. This improves both retrieval precision and generation quality.
-    """
-    child: Chunk
-    parent_text: str
-    parent_id: str
 
 
 class RecursiveCharacterSplitter:
@@ -84,61 +67,6 @@ class RecursiveCharacterSplitter:
                 )
         logger.info("Split %d segments -> %d chunks", len(segments), len(chunks))
         return chunks
-
-    def split_segments_with_parents(
-        self, segments: list[dict], file_name: str = "",
-        child_chunk_size: int = 200,
-    ) -> list[ParentChildChunk]:
-        """Split into parent (paragraph) + child (sentence) chunks.
-
-        Parent chunks are the normal-size chunks produced by split_segments().
-        Child chunks are finer-grained sub-splits of each parent, used for
-        embedding-level retrieval while the parent provides generation context.
-
-        Args:
-            segments: loader output segments.
-            file_name: source file name for metadata.
-            child_chunk_size: max characters per child chunk (default 200).
-
-        Returns:
-            List of ParentChildChunk linking each child to its parent.
-        """
-        parent_chunks = self.split_segments(segments, file_name)
-        child_splitter = RecursiveCharacterSplitter(
-            chunk_size=child_chunk_size,
-            chunk_overlap=min(30, child_chunk_size // 4),
-        )
-
-        results: list[ParentChildChunk] = []
-        for parent in parent_chunks:
-            child_texts = child_splitter.split_text(parent.text)
-            for ct in child_texts:
-                if not ct.strip():
-                    continue
-                child_id = uuid.uuid4().hex[:12]
-                child = Chunk(
-                    text=ct,
-                    chunk_id=child_id,
-                    heading=parent.heading,
-                    page_number=parent.page_number,
-                    metadata={
-                        **parent.metadata,
-                        "chunk_id": child_id,
-                        "parent_id": parent.chunk_id,
-                        "is_child": True,
-                    },
-                )
-                results.append(ParentChildChunk(
-                    child=child,
-                    parent_text=parent.text,
-                    parent_id=parent.chunk_id,
-                ))
-
-        logger.info(
-            "Parent-child split: %d parents -> %d children",
-            len(parent_chunks), len(results),
-        )
-        return results
 
     # ------------------------------------------------------------------
     def _recursive_split(self, text: str, separators: list[str]) -> list[str]:

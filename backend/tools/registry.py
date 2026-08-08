@@ -24,10 +24,6 @@ def list_schemas() -> list[dict[str, Any]]:
     return [t["schema"] for t in _TOOLS.values()]
 
 
-def list_tool_names() -> list[str]:
-    return list(_TOOLS.keys())
-
-
 def get_tool(name: str) -> Callable[..., Any] | None:
     entry = _TOOLS.get(name)
     return entry["run"] if entry else None

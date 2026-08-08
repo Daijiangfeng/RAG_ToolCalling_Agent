@@ -3,15 +3,11 @@ import { Button, Table, App, Typography, Progress, Space, Empty } from "antd";
 import { PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import { getEvaluation, runEvaluation, toApiError } from "../api/client";
 import type { EvaluationResponse } from "../types";
-import { formatDateTime } from "../utils/format";
+import { formatDateTime, formatPct } from "../utils/format";
 import PageContainer from "../components/PageContainer";
 import SectionCard from "../components/SectionCard";
 
 const { Text } = Typography;
-
-function pct(v: number): number {
-  return Math.round((v ?? 0) * 100);
-}
 
 /** hairline 指标卡：小型大写标签 + mono 数值。danger 时数值用语义色。 */
 function MetricCard({
@@ -96,7 +92,7 @@ export default function EvaluationPage() {
       dataIndex: "faithfulness",
       width: 180,
       render: (v: number) => (
-        <Progress percent={pct(v)} size="small" strokeColor="var(--accent)" />
+        <Progress percent={Math.round((v ?? 0) * 100)} size="small" strokeColor="var(--accent)" />
       ),
     },
   ];
@@ -139,12 +135,12 @@ export default function EvaluationPage() {
         {data ? (
           <>
             <div style={metricGrid}>
-              <MetricCard label="Precision@K" value={`${pct(data.retrieval.precision_at_k)}%`} />
-              <MetricCard label="Recall@K" value={`${pct(data.retrieval.recall_at_k)}%`} />
-              <MetricCard label="Faithfulness" value={`${pct(data.generation.faithfulness)}%`} />
+              <MetricCard label="Precision@K" value={formatPct(data.retrieval.precision_at_k)} />
+              <MetricCard label="Recall@K" value={formatPct(data.retrieval.recall_at_k)} />
+              <MetricCard label="Faithfulness" value={formatPct(data.generation.faithfulness)} />
               <MetricCard
                 label="幻觉率"
-                value={`${pct(data.safety.hallucination_rate)}%`}
+                value={formatPct(data.safety.hallucination_rate)}
                 danger
               />
             </div>
@@ -152,11 +148,11 @@ export default function EvaluationPage() {
             <div style={{ ...metricGrid, marginTop: 12 }}>
               <MetricCard
                 label="Answer Relevance"
-                value={`${pct(data.generation.answer_relevance)}%`}
+                value={formatPct(data.generation.answer_relevance)}
               />
               <MetricCard
                 label="Context Relevance"
-                value={`${pct(data.generation.context_relevance)}%`}
+                value={formatPct(data.generation.context_relevance)}
               />
               <MetricCard label="测试样本数" value={String(data.total)} />
             </div>

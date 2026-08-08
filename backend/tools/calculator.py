@@ -20,6 +20,12 @@ _ALLOWED_BINOPS = {
 }
 _ALLOWED_UNARY = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
+
+def normalize_math_expr(q: str) -> str:
+    """Normalize unicode math symbols to ASCII equivalents for evaluation."""
+    return q.replace("×", "*").replace("÷", "/").replace("x", "*").replace("X", "*").replace("^", "**")
+
+
 SCHEMA = {
     "name": "calculator",
     "description": "计算数学算术表达式,例如 '12345*678'、'(3+4)/2'。当用户需要精确数值计算时使用。",

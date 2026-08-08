@@ -100,10 +100,9 @@ def get_agent():
     return _compiled
 
 
-def run_agent(question: str, session_id: str = "default") -> dict[str, Any]:
-    """Execute the agent for a single question and return a serialisable result."""
-    agent = get_agent()
-    initial: AgentState = {
+def _make_initial_state(question: str, session_id: str) -> AgentState:
+    """Build the initial agent state for a new question."""
+    return {
         "question": question,
         "original_question": question,
         "session_id": session_id,
@@ -112,11 +111,10 @@ def run_agent(question: str, session_id: str = "default") -> dict[str, Any]:
         "sources": [],
         "confidence": 0.0,
     }
-    final: AgentState = agent.invoke(initial)
 
-    answer = final.get("answer", "")
-    memory.add_turn(session_id, question, answer)
 
+def _format_result(final: AgentState) -> dict[str, Any]:
+    """Format the final agent state into a serialisable response dict."""
     tools = [
         {"tool": r["tool"], "input": r["input"], "output": r["output"]}
         for r in final.get("tool_results", [])
@@ -130,13 +128,27 @@ def run_agent(question: str, session_id: str = "default") -> dict[str, Any]:
         for s in final.get("sources", [])
     ]
     return {
-        "answer": answer,
+        "answer": final.get("answer", ""),
         "sources": sources,
         "confidence": final.get("confidence", 0.0),
         "tools": tools,
         "trace": final.get("trace", []),
         "intent": final.get("intent", ""),
     }
+
+
+def run_agent(question: str, session_id: str = "default") -> dict[str, Any]:
+    """Execute the agent for a single question and return a serialisable result."""
+    agent = get_agent()
+    initial = _make_initial_state(question, session_id)
+    final: AgentState = agent.invoke(initial)
+
+    answer = final.get("answer", "")
+    memory.add_turn(session_id, question, answer)
+
+    result = _format_result(final)
+    result["answer"] = answer  # ensure the post-memory answer is used
+    return result
 
 
 def run_agent_streaming(question: str, session_id: str = "default"):
@@ -155,15 +167,7 @@ def run_agent_streaming(question: str, session_id: str = "default"):
     from rag.generator import get_generator
 
     agent = get_agent()
-    initial: AgentState = {
-        "question": question,
-        "original_question": question,
-        "session_id": session_id,
-        "trace": [],
-        "tool_results": [],
-        "sources": [],
-        "confidence": 0.0,
-    }
+    initial = _make_initial_state(question, session_id)
     final: AgentState = agent.invoke(initial)
 
     # For tool-based answers, the answer is already complete (no LLM streaming).
@@ -192,23 +196,6 @@ def run_agent_streaming(question: str, session_id: str = "default"):
 
     memory.add_turn(session_id, question, answer)
 
-    tools = [
-        {"tool": r["tool"], "input": r["input"], "output": r["output"]}
-        for r in final.get("tool_results", [])
-    ]
-    sources = [
-        {
-            "text": s.get("text", ""),
-            "score": round(float(s.get("rerank_score", s.get("score", 0.0))), 4),
-            "metadata": s.get("metadata", {}),
-        }
-        for s in final.get("sources", [])
-    ]
-    yield ("done", {
-        "answer": answer,
-        "sources": sources,
-        "confidence": final.get("confidence", 0.0),
-        "tools": tools,
-        "trace": final.get("trace", []),
-        "intent": final.get("intent", ""),
-    })
+    done_payload = _format_result(final)
+    done_payload["answer"] = answer  # use the (possibly re-streamed) answer
+    yield ("done", done_payload)

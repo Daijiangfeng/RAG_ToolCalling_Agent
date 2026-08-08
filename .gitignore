@@ -21,3 +21,12 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# --- Caches ---
+.ruff_cache/
+
+# --- Screenshots / images at root ---
+*.png
+
+# --- Generated reports ---
+evaluation_report.md
